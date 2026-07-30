@@ -1,0 +1,13 @@
+========================================================================
+                       PROJECT INFORMATION CARD
+========================================================================
+Project Name : JA Sync
+Version      : 1.1.0+2
+Tech Stack   : Flutter 3.x / Dart 3.x
+Managed By   : JA Auto Git
+Website      : https://jatechvn.github.io/
+------------------------------------------------------------------------
+Description  : JA Sync - High Performance Local Folder Synchronization 
+               Software for Windows Desktop. Features two-way sync, 
+               smart exclusions, conflict resolution, and glassmorphism UI.
+========================================================================

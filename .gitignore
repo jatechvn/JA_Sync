@@ -1,0 +1,51 @@
+# Flutter/Dart/Pub
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+*.g.dart
+*.freezed.dart
+
+# Native OS binaries (C++/Rust compiled cores via FFI)
+lib/modules/native/*.dll
+lib/modules/native/*.so
+lib/modules/native/*.dylib
+
+# Platform build outputs
+windows/flutter/ephemeral/
+macos/Flutter/ephemeral/
+linux/flutter/ephemeral/
+
+# Logs and temporary files
+logs/
+assets/temp/
+*.log
+*.tmp
+*.ja_sync_tmp
+
+# Local IDE / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Application Configuration (User data)
+config.json
+config.json.bak
+sync_history.json
+manifest_*.json
+deletions_*.json
+
+# Build outputs (Optional: uncomment if you don't want to push the compiled app)
+# dist/
+
+# Large compressed archives & binaries
+*.zip
+*.rar
+*.7z
+*.tar
+*.gz
+*.exe
+*.msi
