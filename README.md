@@ -39,8 +39,6 @@ JA_Sync/
 │   ├── modules/               # Core business logic & UI components
 │   └── services/              # Background services
 ├── assets/                    # Static resources (icons, images)
-├── dist/                      # Pre-compiled Windows Executables (Release)
-├── test/                      # Unit tests
 ├── pubspec.yaml               # Flutter package dependencies and version
 ├── README.md                  # Project documentation (this file)
 ├── USER_GUIDE.md              # Detailed User Guide
