@@ -191,29 +191,35 @@ class AppStrings {
       '关于与指南',
       'Giới thiệu & Hướng dẫn');
   String get aboutContent => _s(
-      r'''JA Sync Manager (v1.1.0) is a professional, high-performance, and ultra-secure file synchronization application.
+      r'''JA Sync Manager (v1.2.0) is a professional, high-performance, and ultra-secure file synchronization application.
 
 Key Features & Highlights:
 • Two-Way Sync: Intelligently synchronizes file additions, modifications, and deletions between two directories.
 • One-Way Mirror: Keeps the Target directory as an exact, automated mirror copy of the Source directory.
+• Sync Profiles: Apply built-in presets (Backup Mirror, Bi-Directional, Archive) or save your own settings as a reusable profile.
+• Dry-Run Preview: See exactly what a sync would copy, delete, or create before it runs — no files are touched.
 • Maximum Data Safety (Atomic Copy): Streams files into atomic temporary files (.ja_sync_tmp) before finalizing to guarantee target files are never corrupted during sudden power or network outages.
 • Smart Auto-Exclusions: Automatically skips developer cache & OS junk folders (.git, node_modules, __pycache__, $recycle.bin, Office lock files ~$...).
 • Premium Windows 10/11 Glassmorphism UI: Fully integrated with native Windows 11 Acrylic & Windows 10 Aero Blur aesthetics.''',
-      
-      r'''JA Sync Manager (v1.1.0) 是一款专业、高效且绝对安全的文件数据同步工具。
+
+      r'''JA Sync Manager (v1.2.0) 是一款专业、高效且绝对安全的文件数据同步工具。
 
 核心特色与优势：
 • 双向智能同步 (Two-Way Sync)：智能检测并双向同步源与目标文件夹中的新增、修改与删除操作。
 • 单向镜像同步 (One-Way Mirror)：使目标文件夹保持为源文件夹的精确镜像副本。
+• 同步配置模板 (Sync Profiles)：应用内置模板（镜像备份、双向、归档）或将当前设置保存为可复用模板。
+• 预览同步 (Dry-Run Preview)：在执行前查看将要复制、删除或创建的内容，不会更改任何文件。
 • 原子级写入安全保障 (Atomic Copy)：写入临时文件 (.ja_sync_tmp) 验证成功后再重命名，即使遭遇突发断电或断网，目标文件也绝不会损坏。
 • 智能垃圾过滤 (Smart Ignore)：自动排除系统与开发缓存垃圾 (.git, node_modules, __pycache__, $recycle.bin, Office 临时锁定文件 ~$...)。
 • Windows 10/11 高级 Glassmorphism 界面：原生集成 Windows 11 亚克力 (Acrylic) 与 Windows 10 Aero Blur 晶莹磨砂效果。''',
-      
-      r'''JA Sync Manager (v1.1.0) là giải pháp đồng bộ hóa dữ liệu chuyên nghiệp, hiệu năng cao và an toàn tuyệt đối dành cho máy tính.
+
+      r'''JA Sync Manager (v1.2.0) là giải pháp đồng bộ hóa dữ liệu chuyên nghiệp, hiệu năng cao và an toàn tuyệt đối dành cho máy tính.
 
 Tính năng nổi bật & Ưu điểm:
 • Đồng bộ Hai Chiều (Two-Way Sync): Tự động cập nhật dữ liệu qua lại giữa hai thư mục một cách thông minh và nhất quán.
 • Đồng bộ Một Chiều (One-Way Mirror): Biến thư mục Đích thành bản sao chính xác tuyệt đối của thư mục Nguồn.
+• Hồ sơ đồng bộ (Sync Profiles): Áp dụng mẫu có sẵn (Sao lưu Mirror, Hai chiều, Lưu trữ) hoặc lưu cài đặt hiện tại thành hồ sơ để tái sử dụng.
+• Xem trước đồng bộ (Dry-Run Preview): Xem chính xác những gì sẽ được sao chép, xóa, hoặc tạo mới trước khi chạy thật — không đụng đến file nào.
 • An toàn dữ liệu tối đa (Atomic Copy): Ghi dữ liệu thông qua file tạm nguyên tử (.ja_sync_tmp) chống hỏng file ngay cả khi mất điện hay mất kết nối mạng bất ngờ.
 • Bộ lọc thông minh tự động (Smart Ignore): Tự động loại bỏ rác hệ thống & lập trình (.git, node_modules, __pycache__, $recycle.bin, file tạm Office ~$...).
 • Giao diện Glassmorphism Windows 10/11: Hỗ trợ hiệu ứng kính mờ Acrylic (Win11) & Aero Blur (Win10) hiện đại, mượt mà và sang trọng.''');
@@ -278,6 +284,112 @@ Tính năng nổi bật & Ưu điểm:
 
 4. Nhập & Xuất Cấu Hình:
    • Dễ dàng sao lưu danh sách cặp đồng bộ bằng cách nhấn "Xuất" file JSON và "Nhập" lại trên máy tính khác.''');
+
+  String get btnClose => _s('Close', '关闭', 'Đóng');
+
+  // --- Sync Profiles ---
+  String get labelApplyProfile =>
+      _s('Apply Profile (optional)', '应用配置模板（可选）', 'Áp dụng hồ sơ (tùy chọn)');
+  String get optNoProfile =>
+      _s('None - Custom Settings', '无 - 自定义设置', 'Không - Tùy chỉnh');
+  String get profileNameBackupMirror =>
+      _s('Backup (Mirror)', '备份（镜像）', 'Sao lưu (Mirror)');
+  String get profileDescBackupMirror => _s(
+      'One-way copy, source is always right, manual trigger',
+      '单向复制，源文件夹始终优先，手动触发',
+      'Sao chép một chiều, nguồn luôn đúng, chạy thủ công');
+  String get profileNameBiDirectional =>
+      _s('Bi-Directional (Realtime)', '双向（实时）', 'Hai chiều (Thời gian thực)');
+  String get profileDescBiDirectional => _s(
+      'Two-way sync, newer file wins, watches for changes live',
+      '双向同步，最新文件优先，实时监控变化',
+      'Đồng bộ hai chiều, file mới hơn thắng, theo dõi thay đổi tức thời');
+  String get profileNameArchive => _s('Archive', '归档', 'Lưu trữ');
+  String get profileDescArchive => _s(
+      'One-way copy, target is always right, syncs once a day',
+      '单向复制，目标文件夹始终优先，每天同步一次',
+      'Sao chép một chiều, đích luôn đúng, đồng bộ mỗi ngày một lần');
+  String get btnManageProfiles => _s('Manage Profiles', '管理配置模板', 'Quản lý hồ sơ');
+  String get profilesDialogTitle => _s('Sync Profiles', '同步配置模板', 'Hồ sơ đồng bộ');
+  String get labelBuiltInProfiles => _s('Built-in', '内置', 'Có sẵn');
+  String get labelCustomProfiles => _s('Custom', '自定义', 'Tùy chỉnh');
+  String get btnSaveAsProfile =>
+      _s('Save as Profile', '另存为配置模板', 'Lưu thành hồ sơ');
+  String get dlgSaveProfileTitle =>
+      _s('Save Profile', '保存配置模板', 'Lưu hồ sơ');
+  String get labelProfileName => _s('Profile Name', '模板名称', 'Tên hồ sơ');
+  String get errProfileNameEmpty =>
+      _s('Profile name cannot be empty', '模板名称不能为空', 'Tên hồ sơ không được để trống');
+  String get errProfileNameExists => _s(
+      'A profile with this name already exists',
+      '已存在同名模板',
+      'Đã tồn tại hồ sơ với tên này');
+  String get msgProfileSaved => _s('Profile saved!', '模板已保存！', 'Đã lưu hồ sơ!');
+  String get confirmDeleteProfileDesc => _s(
+      'Are you sure you want to delete this custom profile?',
+      '您确定要删除此自定义模板吗？',
+      'Bạn có chắc muốn xóa hồ sơ tùy chỉnh này?');
+  String get emptyCustomProfiles =>
+      _s('No custom profiles yet', '暂无自定义模板', 'Chưa có hồ sơ tùy chỉnh nào');
+
+  // --- Dry-Run / Preview Sync ---
+  String get btnPreviewSync => _s('Preview Sync', '预览同步', 'Xem trước đồng bộ');
+  String get previewDialogTitle =>
+      _s('Sync Preview', '同步预览', 'Xem trước đồng bộ');
+  String get previewLoading =>
+      _s('Scanning for differences...', '正在扫描差异...', 'Đang quét khác biệt...');
+  String get previewNoChanges => _s(
+      'No changes detected. Everything is already in sync.',
+      '未检测到任何变化，一切都已同步。',
+      'Không phát hiện thay đổi nào. Mọi thứ đã được đồng bộ.');
+  String get previewErrorPaths => _s(
+      'Cannot preview: source or target folder is inaccessible.',
+      '无法预览：源文件夹或目标文件夹无法访问。',
+      'Không thể xem trước: thư mục nguồn hoặc đích không thể truy cập.');
+  String previewSummary(int copyCount, int deleteCount, int dirCount) => _s(
+      '$copyCount to copy · $deleteCount to delete · $dirCount folders to create',
+      '$copyCount 个待复制 · $deleteCount 个待删除 · $dirCount 个待创建文件夹',
+      '$copyCount tệp cần sao chép · $deleteCount tệp cần xóa · $dirCount thư mục cần tạo');
+  String get previewActionCopyToTarget =>
+      _s('Copy to Target', '复制到目标', 'Sao chép sang Đích');
+  String get previewActionCopyToSource =>
+      _s('Copy to Source', '复制到源', 'Sao chép sang Nguồn');
+  String get previewActionDeleteFromTarget =>
+      _s('Delete from Target', '从目标删除', 'Xóa khỏi Đích');
+  String get previewActionDeleteFromSource =>
+      _s('Delete from Source', '从源删除', 'Xóa khỏi Nguồn');
+  String get previewActionCreateFolder =>
+      _s('Create folder', '创建文件夹', 'Tạo thư mục');
+}
+
+/// Resolves a profile's display name/description: built-in profiles are
+/// translated by key; custom profiles just show their user-given name.
+extension SyncProfileDisplay on SyncProfile {
+  String displayName(AppStrings s) {
+    switch (key) {
+      case 'backup_mirror':
+        return s.profileNameBackupMirror;
+      case 'bi_directional':
+        return s.profileNameBiDirectional;
+      case 'archive':
+        return s.profileNameArchive;
+      default:
+        return key;
+    }
+  }
+
+  String displayDescription(AppStrings s) {
+    switch (key) {
+      case 'backup_mirror':
+        return s.profileDescBackupMirror;
+      case 'bi_directional':
+        return s.profileDescBiDirectional;
+      case 'archive':
+        return s.profileDescArchive;
+      default:
+        return '';
+    }
+  }
 }
 
 class LanguageNotifier extends ChangeNotifier {

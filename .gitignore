@@ -1,5 +1,6 @@
 # Flutter/Dart/Pub
 .dart_tool/
+.flutter-plugins-dependencies
 .packages
 .pub-cache/
 .pub/
@@ -30,6 +31,10 @@ assets/temp/
 .DS_Store
 Thumbs.db
 desktop.ini
+*.lnk
+
+# Personal notes / AI session transcripts (not project documentation)
+mới 1.md
 
 # Application Configuration (User data)
 config.json

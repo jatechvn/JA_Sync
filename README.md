@@ -6,12 +6,13 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/version-1.2.0-informational.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Flutter-3.x-blue.svg?style=flat-square" alt="Flutter">
   <img src="https://img.shields.io/badge/Dart-3.x-blue.svg?style=flat-square" alt="Dart">
 </p>
 
-<p align="center"><a href="#quick-start">🚀 Quick Start</a> • <a href="#features">💡 Features</a> • <a href="USER_GUIDE.md">📖 User Guide</a> • <a href="https://jatechvn.github.io/">🌐 Website</a></p>
+<p align="center"><a href="#quick-start">🚀 Quick Start</a> • <a href="#features">💡 Features</a> • <a href="USER_GUIDE.md">📖 User Guide</a> • <a href="CHANGELOG.md">📝 Changelog</a> • <a href="https://jatechvn.github.io/">🌐 Website</a></p>
 
 ---
 
@@ -25,6 +26,8 @@
 - **Smart System Exclusions**: Automatically skips build cache directories (`build`, `.dart_tool`, `node_modules`, `.git`, `.plugin_symlinks`, etc.) to save time and CPU.
 - **Beautiful Glassmorphism UI**: Stunning Windows 11-style Acrylic/Mica transparent effects, fully customizable blur and opacity.
 - **Two-Way & One-Way Sync**: Safely sync changes from Source to Target, or bi-directionally with conflict resolution strategies (Newer Wins, Source Wins, Target Wins).
+- **Sync Profiles**: Apply built-in presets (Backup Mirror, Bi-Directional, Archive) or save your own pair settings as a reusable profile.
+- **Dry-Run Preview**: Preview exactly what a sync would copy, delete, or create before committing to it — no files are touched.
 - **Atomic Operations**: Files are copied to temporary buffers and renamed atomically to prevent data corruption during unexpected power losses.
 - **Detailed Sync History**: Logs every copied, deleted, or skipped file in a structured JSON log.
 
@@ -39,8 +42,11 @@ JA_Sync/
 │   ├── modules/               # Core business logic & UI components
 │   └── services/              # Background services
 ├── assets/                    # Static resources (icons, images)
+├── dist/                      # Pre-compiled Windows Executables (Release)
+├── test/                      # Unit tests
 ├── pubspec.yaml               # Flutter package dependencies and version
 ├── README.md                  # Project documentation (this file)
+├── CHANGELOG.md               # Version history
 ├── USER_GUIDE.md              # Detailed User Guide
 ├── ABOUT.txt                  # Project information card
 └── LICENSE                    # MIT License

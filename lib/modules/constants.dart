@@ -3,7 +3,7 @@
 
 const String appId = 'com.jatech.ja_sync';
 const String appName = 'JA Sync';
-const String appVersion = '1.1.0';
+const String appVersion = '1.2.0';
 
 // Default filenames
 const String defaultConfigFile = 'config.json';

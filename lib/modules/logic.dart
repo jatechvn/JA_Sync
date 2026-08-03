@@ -32,7 +32,8 @@ class SyncPairState {
 
 /// Action description for sync execution queue
 class SyncAction {
-  final String type; // 'copy_src_to_tgt', 'copy_tgt_to_src', 'delete_src', 'delete_tgt', 'create_dir_src', 'create_dir_tgt'
+  final String
+  type; // 'copy_src_to_tgt', 'copy_tgt_to_src', 'delete_src', 'delete_tgt', 'create_dir_src', 'create_dir_tgt'
   final String relativePath;
   final String srcFullPath;
   final String destFullPath;
@@ -52,6 +53,7 @@ class SyncLogic extends ChangeNotifier {
   final Map<String, List<StreamSubscription>> _watchers = {};
   final Map<String, Timer> _scheduledTimers = {};
   final Map<String, Timer> _watcherRetryTimers = {};
+  final Set<String> _resyncPending = {};
   bool _initialized = false;
 
   List<SyncPairState> get states => _states;
@@ -98,15 +100,22 @@ class SyncLogic extends ChangeNotifier {
   /// Remove a sync pair and clean up watchers/timers
   Future<void> removePair(String id) async {
     _stopSchedule(id);
+    _resyncPending.remove(id);
     await AppConfig.removePair(id);
     _states.removeWhere((s) => s.config.id == id);
 
-    // Delete manifest file
+    // Delete manifest and recorded-deletions files
     final exeDir = _getExeDir();
     final manifestFile = File(p.join(exeDir, 'manifest_$id.json'));
     if (manifestFile.existsSync()) {
       try {
         manifestFile.deleteSync();
+      } catch (_) {}
+    }
+    final deletionsFile = File(p.join(exeDir, 'deletions_$id.json'));
+    if (deletionsFile.existsSync()) {
+      try {
+        deletionsFile.deleteSync();
       } catch (_) {}
     }
 
@@ -133,7 +142,12 @@ class SyncLogic extends ChangeNotifier {
   }
 
   /// Update full settings of a pair
-  Future<void> updatePairSettings(String id, String syncMode, String schedule, List<String> excludes) async {
+  Future<void> updatePairSettings(
+    String id,
+    String syncMode,
+    String schedule,
+    List<String> excludes,
+  ) async {
     final state = getState(id);
     if (state == null) return;
 
@@ -146,7 +160,9 @@ class SyncLogic extends ChangeNotifier {
     await AppConfig.updatePair(state.config);
     _setupSchedule(state.config);
     notifyListeners();
-    _logger.info('Updated pair settings for $id: syncMode=$syncMode, schedule=$schedule, excludes=$excludes');
+    _logger.info(
+      'Updated pair settings for $id: syncMode=$syncMode, schedule=$schedule, excludes=$excludes',
+    );
 
     if (schedule == 'realtime' && oldSchedule != 'realtime') {
       unawaited(syncPair(id));
@@ -173,9 +189,14 @@ class SyncLogic extends ChangeNotifier {
   void _setupSchedule(SyncPairConfig pair) {
     _stopSchedule(pair.id);
 
-    if (pair.schedule == 'realtime') {
-      _startWatcher(pair);
-    } else if (pair.schedule != 'manual') {
+    // Always run a lightweight watcher so genuine deletions are confirmed
+    // (see onEvent's delete-recording), regardless of schedule. Only
+    // 'realtime' pairs use it to auto-trigger a debounced sync; manual and
+    // timed pairs still rely on a manual click / the periodic timer below,
+    // but by then any deletion made while the app was running is recorded.
+    _startWatcher(pair);
+
+    if (pair.schedule != 'realtime' && pair.schedule != 'manual') {
       Duration duration;
       switch (pair.schedule) {
         case '15m':
@@ -196,7 +217,9 @@ class SyncLogic extends ChangeNotifier {
       _scheduledTimers[pair.id] = Timer.periodic(duration, (_) {
         syncPair(pair.id);
       });
-      _logger.info('Scheduled periodic sync for ${pair.id} every ${pair.schedule}');
+      _logger.info(
+        'Scheduled periodic sync for ${pair.id} every ${pair.schedule}',
+      );
     }
   }
 
@@ -243,7 +266,9 @@ class SyncLogic extends ChangeNotifier {
     _watcherRetryTimers[pair.id] = Timer(const Duration(seconds: 15), () {
       final state = getState(pair.id);
       if (state != null && state.config.schedule == 'realtime') {
-        _logger.info('Retrying starting directory watcher for pair ${pair.id}...');
+        _logger.info(
+          'Retrying starting directory watcher for pair ${pair.id}...',
+        );
         _startWatcher(pair);
       }
     });
@@ -258,12 +283,16 @@ class SyncLogic extends ChangeNotifier {
 
     try {
       if (!srcDir.existsSync() || !tgtDir.existsSync()) {
-        _logger.warning('Cannot start watcher for pair ${pair.id}: source or target path does not exist');
+        _logger.warning(
+          'Cannot start watcher for pair ${pair.id}: source or target path does not exist',
+        );
         _scheduleWatcherRetry(pair);
         return;
       }
     } catch (e) {
-      _logger.warning('Failed directory existence check for watcher on pair ${pair.id}: $e');
+      _logger.warning(
+        'Failed directory existence check for watcher on pair ${pair.id}: $e',
+      );
       _scheduleWatcherRetry(pair);
       return;
     }
@@ -274,17 +303,26 @@ class SyncLogic extends ChangeNotifier {
       if (isSystemIgnored(event.path)) {
         return;
       }
-      _logger.info('[Watcher] Change detected in pair ${pair.id}: ${event.path}');
+      _logger.info(
+        '[Watcher] Change detected in pair ${pair.id}: ${event.path}',
+      );
 
       if (event is FileSystemDeleteEvent) {
         final normPath = p.normalize(event.path).toLowerCase();
         final normSource = p.normalize(pair.sourcePath).toLowerCase();
         final isSource = normPath.startsWith(normSource);
         final rootPath = isSource ? pair.sourcePath : pair.targetPath;
-        final relPath = p.relative(event.path, from: rootPath).replaceAll(r'\', '/');
-        
+        final relPath = p
+            .relative(event.path, from: rootPath)
+            .replaceAll(r'\', '/');
+
         _recordDeletion(pair.id, relPath, isSource);
       }
+
+      // Only realtime pairs auto-trigger a sync on change; manual/timed
+      // pairs just needed the deletion recorded above and will pick it up
+      // on their next manual click or scheduled tick.
+      if (pair.schedule != 'realtime') return;
 
       debounceTimer?.cancel();
       debounceTimer = Timer(const Duration(seconds: 4), () {
@@ -293,28 +331,36 @@ class SyncLogic extends ChangeNotifier {
     }
 
     try {
-      final sub1 = srcDir.watch(recursive: true).listen(
-        onEvent,
-        onError: (e) {
-          _logger.warning('Watcher error on source for pair ${pair.id}: $e');
-          _scheduleWatcherRetry(pair);
-        },
-        onDone: () {
-          _logger.info('Watcher on source for pair ${pair.id} closed.');
-          _scheduleWatcherRetry(pair);
-        },
-      );
-      final sub2 = tgtDir.watch(recursive: true).listen(
-        onEvent,
-        onError: (e) {
-          _logger.warning('Watcher error on target for pair ${pair.id}: $e');
-          _scheduleWatcherRetry(pair);
-        },
-        onDone: () {
-          _logger.info('Watcher on target for pair ${pair.id} closed.');
-          _scheduleWatcherRetry(pair);
-        },
-      );
+      final sub1 = srcDir
+          .watch(recursive: true)
+          .listen(
+            onEvent,
+            onError: (e) {
+              _logger.warning(
+                'Watcher error on source for pair ${pair.id}: $e',
+              );
+              _scheduleWatcherRetry(pair);
+            },
+            onDone: () {
+              _logger.info('Watcher on source for pair ${pair.id} closed.');
+              _scheduleWatcherRetry(pair);
+            },
+          );
+      final sub2 = tgtDir
+          .watch(recursive: true)
+          .listen(
+            onEvent,
+            onError: (e) {
+              _logger.warning(
+                'Watcher error on target for pair ${pair.id}: $e',
+              );
+              _scheduleWatcherRetry(pair);
+            },
+            onDone: () {
+              _logger.info('Watcher on target for pair ${pair.id} closed.');
+              _scheduleWatcherRetry(pair);
+            },
+          );
 
       _watchers[pair.id] = [sub1, sub2];
       _logger.info('Started watcher for sync pair: ${pair.id}');
@@ -336,6 +382,14 @@ class SyncLogic extends ChangeNotifier {
     _watcherRetryTimers.remove(id)?.cancel();
   }
 
+  /// Re-runs sync for [id] if a request arrived while it was busy
+  void _runPendingResyncIfAny(String id) {
+    if (_resyncPending.remove(id)) {
+      _logger.info('Running queued follow-up sync for $id');
+      unawaited(syncPair(id));
+    }
+  }
+
   /// Synchronize all loaded pairs
   Future<void> syncAll() async {
     _logger.info('=== Sync All Started ===');
@@ -346,15 +400,89 @@ class SyncLogic extends ChangeNotifier {
     _logger.info('=== Sync All Finished ===');
   }
 
+  /// Scans both sides, loads the manifest/deletion records, and returns the
+  /// list of pending actions -- without executing them or touching any
+  /// on-disk state. Shared by syncPair() (real run) and previewSync()
+  /// (dry-run) so the two can never drift apart.
+  Future<List<SyncAction>> _scanAndCompare(SyncPairState state) async {
+    final sourceFiles = await scanDirectory(state.config.sourcePath);
+    final targetFiles = await scanDirectory(state.config.targetPath);
+
+    final excludes = state.config.excludes;
+    if (excludes.isNotEmpty) {
+      sourceFiles.removeWhere((k, v) => _isExcluded(k, excludes));
+      targetFiles.removeWhere((k, v) => _isExcluded(k, excludes));
+    }
+
+    final exeDir = _getExeDir();
+    final manifestFile = File(p.join(exeDir, 'manifest_${state.config.id}.json'));
+    Map<String, FileInfo> manifestFiles = {};
+
+    if (manifestFile.existsSync()) {
+      try {
+        final content = manifestFile.readAsStringSync();
+        final Map<String, dynamic> json = jsonDecode(content);
+        json.forEach((k, v) {
+          if (isSystemIgnored(k)) return;
+          if (excludes.isEmpty || !_isExcluded(k, excludes)) {
+            manifestFiles[k] = FileInfo.fromJson(v as Map<String, dynamic>);
+          }
+        });
+      } catch (e) {
+        _logger.warning(
+          'Failed to parse manifest for pair ${state.config.id}: $e. Performing fallback comparison.',
+        );
+      }
+    }
+
+    final deletionsFile = File(
+      p.join(exeDir, 'deletions_${state.config.id}.json'),
+    );
+    final deletions = _loadDeletions(deletionsFile);
+
+    return _compareDirectories(
+      sourceFiles: sourceFiles,
+      targetFiles: targetFiles,
+      manifestFiles: manifestFiles,
+      srcRoot: state.config.sourcePath,
+      tgtRoot: state.config.targetPath,
+      config: state.config,
+      deletions: deletions,
+    );
+  }
+
+  /// Dry-run: computes what a real sync would do for [id] without changing
+  /// any file, manifest, or deletion record. Returns null if the pair
+  /// doesn't exist, either folder is currently inaccessible, or the scan
+  /// fails -- distinct from an empty list, which means "no changes".
+  Future<List<SyncAction>?> previewSync(String id) async {
+    final state = getState(id);
+    if (state == null) return null;
+
+    try {
+      final srcDir = Directory(state.config.sourcePath);
+      final tgtDir = Directory(state.config.targetPath);
+      if (!await srcDir.exists() || !await tgtDir.exists()) return null;
+      return await _scanAndCompare(state);
+    } catch (e) {
+      _logger.warning('Preview failed for pair $id: $e');
+      return null;
+    }
+  }
+
   /// Runs Bidirectional Sync for a single pair
   Future<void> syncPair(String id) async {
     final state = getState(id);
     if (state == null) return;
 
     if (state.status == statusScanning || state.status == statusSyncing) {
-      _logger.info('Sync pair $id is already busy: ${state.status}');
+      _logger.info(
+        'Sync pair $id is already busy: ${state.status}. Queuing a follow-up sync.',
+      );
+      _resyncPending.add(id);
       return;
     }
+    _resyncPending.remove(id);
 
     _logger.info('=== START SYNC PAIR $id ===');
     _logger.info('Source: ${state.config.sourcePath}');
@@ -389,51 +517,11 @@ class SyncLogic extends ChangeNotifier {
         return;
       }
 
-      // 1. Scan folders
-      final sourceFiles = await scanDirectory(state.config.sourcePath);
-      final targetFiles = await scanDirectory(state.config.targetPath);
-
-      // Filter exclusions
-      final excludes = state.config.excludes;
-      if (excludes.isNotEmpty) {
-        sourceFiles.removeWhere((k, v) => _isExcluded(k, excludes));
-        targetFiles.removeWhere((k, v) => _isExcluded(k, excludes));
-      }
-
-      // 2. Load manifest from previous sync
+      // 1-3. Scan both sides, load manifest/deletions, and compare
       final exeDir = _getExeDir();
       final manifestFile = File(p.join(exeDir, 'manifest_$id.json'));
-      Map<String, FileInfo> manifestFiles = {};
-
-      if (manifestFile.existsSync()) {
-        try {
-          final content = manifestFile.readAsStringSync();
-          final Map<String, dynamic> json = jsonDecode(content);
-          json.forEach((k, v) {
-            if (isSystemIgnored(k)) return;
-            if (excludes.isEmpty || !_isExcluded(k, excludes)) {
-              manifestFiles[k] = FileInfo.fromJson(v as Map<String, dynamic>);
-            }
-          });
-        } catch (e) {
-          _logger.warning('Failed to parse manifest for pair $id: $e. Performing fallback comparison.');
-        }
-      }
-
-      // 2.5 Load recorded deletions
       final deletionsFile = File(p.join(exeDir, 'deletions_$id.json'));
-      final deletions = _loadDeletions(deletionsFile);
-
-      // 3. Perform comparison and gather list of required actions
-      final actions = _compareDirectories(
-        sourceFiles: sourceFiles,
-        targetFiles: targetFiles,
-        manifestFiles: manifestFiles,
-        srcRoot: state.config.sourcePath,
-        tgtRoot: state.config.targetPath,
-        config: state.config,
-        deletions: deletions,
-      );
+      final actions = await _scanAndCompare(state);
 
       _logger.info('Found ${actions.length} sync actions to execute.');
 
@@ -442,14 +530,15 @@ class SyncLogic extends ChangeNotifier {
         state.status = statusCompleted;
         state.progress = 1.0;
         state.statusMessage = 'Already up to date';
-        
+
         state.config.lastSyncTime = formatTimestampDisplay();
         await AppConfig.updatePair(state.config);
-        
+
         // Write fresh manifest anyway
-        _writeManifest(manifestFile, sourceFiles);
+        final freshSourceFiles = await scanDirectory(state.config.sourcePath);
+        _writeManifest(manifestFile, freshSourceFiles);
         notifyListeners();
-        
+
         // Reset status to IDLE after a short delay
         Timer(const Duration(seconds: 4), () {
           if (state.status == statusCompleted) {
@@ -458,6 +547,7 @@ class SyncLogic extends ChangeNotifier {
             notifyListeners();
           }
         });
+        _runPendingResyncIfAny(id);
         return;
       }
 
@@ -488,7 +578,8 @@ class SyncLogic extends ChangeNotifier {
 
         try {
           await _executeAction(action, (bytesWrittenInCurrentFile) {
-            final currentProcessedSize = processedSizeBeforeAction + bytesWrittenInCurrentFile;
+            final currentProcessedSize =
+                processedSizeBeforeAction + bytesWrittenInCurrentFile;
             if (totalSize > 0) {
               state.progress = currentProcessedSize / totalSize;
             }
@@ -499,7 +590,9 @@ class SyncLogic extends ChangeNotifier {
             }
           }, pendingHistory);
         } catch (e) {
-          _logger.warning('Failed to execute sync action [${action.type}] for ${action.relativePath}: $e');
+          _logger.warning(
+            'Failed to execute sync action [${action.type}] for ${action.relativePath}: $e',
+          );
           failedActionsCount++;
         }
 
@@ -518,19 +611,30 @@ class SyncLogic extends ChangeNotifier {
         await _saveHistoryEntriesBatch(pendingHistory);
       }
 
-      // Clear successfully processed deletions from the record
+      // Clear successfully processed deletions from the record. Reload from
+      // disk first: the watcher may have recorded new deletions on disk
+      // while this sync was running its (possibly long) action loop, and
+      // writing back the stale in-memory snapshot loaded at step 2.5 would
+      // silently drop them.
+      final currentDeletions = _loadDeletions(deletionsFile);
       for (final action in actions) {
         if (action.type == 'delete_tgt') {
-          deletions.deletedOnSource.remove(action.relativePath);
+          currentDeletions.deletedOnSource.remove(action.relativePath);
         } else if (action.type == 'delete_src') {
-          deletions.deletedOnTarget.remove(action.relativePath);
+          currentDeletions.deletedOnTarget.remove(action.relativePath);
         }
       }
-      _saveDeletions(deletionsFile, deletions);
+      _saveDeletions(deletionsFile, currentDeletions);
 
       // 5. Post-sync operations: clean up empty directories that were deleted
-      await _cleanEmptyDirectories(state.config.sourcePath, state.config.sourcePath);
-      await _cleanEmptyDirectories(state.config.targetPath, state.config.targetPath);
+      await _cleanEmptyDirectories(
+        state.config.sourcePath,
+        state.config.sourcePath,
+      );
+      await _cleanEmptyDirectories(
+        state.config.targetPath,
+        state.config.targetPath,
+      );
 
       // 6. Rescan source files to build the definitive new manifest
       final finalSourceFiles = await scanDirectory(state.config.sourcePath);
@@ -539,18 +643,24 @@ class SyncLogic extends ChangeNotifier {
       state.status = statusCompleted;
       state.progress = 1.0;
       if (failedActionsCount > 0) {
-        state.statusMessage = 'Sync completed with $failedActionsCount skipped/failed files';
+        state.statusMessage =
+            'Sync completed with $failedActionsCount skipped/failed files';
       } else {
-        state.statusMessage = 'Sync completed successfully! (${actions.length} changes)';
+        state.statusMessage =
+            'Sync completed successfully! (${actions.length} changes)';
       }
       state.currentFile = '';
 
       state.config.lastSyncTime = formatTimestampDisplay();
       await AppConfig.updatePair(state.config);
 
-      _writeHistoryLog('SYNC', state.config.sourcePath, state.config.targetPath,
-          'Executed ${actions.length} actions (failed: $failedActionsCount)');
-      
+      _writeHistoryLog(
+        'SYNC',
+        state.config.sourcePath,
+        state.config.targetPath,
+        'Executed ${actions.length} actions (failed: $failedActionsCount)',
+      );
+
       notifyListeners();
 
       // Reset to IDLE after a few seconds
@@ -561,11 +671,17 @@ class SyncLogic extends ChangeNotifier {
           notifyListeners();
         }
       });
+      _runPendingResyncIfAny(id);
     } catch (e, stack) {
       _logger.severe('Sync error on pair $id: $e', e, stack);
       state.status = statusError;
       state.statusMessage = 'Error: $e';
-      _writeHistoryLog('ERROR', state.config.sourcePath, state.config.targetPath, e.toString());
+      _writeHistoryLog(
+        'ERROR',
+        state.config.sourcePath,
+        state.config.targetPath,
+        e.toString(),
+      );
       await _addHistoryEntry(
         action: 'ERROR',
         file: 'Pair $id',
@@ -598,7 +714,9 @@ class SyncLogic extends ChangeNotifier {
     if (targetIsEmpty || sourceIsEmpty) {
       if (manifestFiles.isNotEmpty) {
         activeManifest = {};
-        _logger.warning('Safeguard triggered: One of the sync directories is completely empty. Ignoring manifest to prevent accidental deletions.');
+        _logger.warning(
+          'Safeguard triggered: One of the sync directories is completely empty. Ignoring manifest to prevent accidental deletions.',
+        );
       }
     }
 
@@ -613,49 +731,59 @@ class SyncLogic extends ChangeNotifier {
         if (isSystemIgnored(path)) continue;
         final src = sourceFiles[path];
         final tgt = targetFiles[path];
-        
-        if ((src != null && src.isInaccessible) || (tgt != null && tgt.isInaccessible)) {
-          _logger.warning('Skipping file $path because it is locked or inaccessible on one of the sides.');
+
+        if ((src != null && src.isInaccessible) ||
+            (tgt != null && tgt.isInaccessible)) {
+          _logger.warning(
+            'Skipping file $path because it is locked or inaccessible on one of the sides.',
+          );
           continue;
         }
-        
+
         final srcFull = p.normalize(p.join(srcRoot, path));
         final tgtFull = p.normalize(p.join(tgtRoot, path));
 
         if (src != null) {
           if (tgt == null) {
             // New in source -> copy to target
-            actions.add(SyncAction(
-              type: src.isDirectory ? 'create_dir_tgt' : 'copy_src_to_tgt',
-              relativePath: path,
-              srcFullPath: srcFull,
-              destFullPath: tgtFull,
-              size: src.size,
-            ));
-          } else {
-            // Exists in both -> compare size and mtime
-            final changed = src.isDirectory != tgt.isDirectory ||
-                src.size != tgt.size ||
-                src.mtime.difference(tgt.mtime).abs().inSeconds > 2;
-            if (changed) {
-              actions.add(SyncAction(
+            actions.add(
+              SyncAction(
                 type: src.isDirectory ? 'create_dir_tgt' : 'copy_src_to_tgt',
                 relativePath: path,
                 srcFullPath: srcFull,
                 destFullPath: tgtFull,
                 size: src.size,
-              ));
+              ),
+            );
+          } else {
+            // Exists in both -> compare size and mtime
+            final changed =
+                src.isDirectory != tgt.isDirectory ||
+                src.size != tgt.size ||
+                src.mtime.difference(tgt.mtime).abs().inSeconds > 2;
+            if (changed) {
+              actions.add(
+                SyncAction(
+                  type: src.isDirectory ? 'create_dir_tgt' : 'copy_src_to_tgt',
+                  relativePath: path,
+                  srcFullPath: srcFull,
+                  destFullPath: tgtFull,
+                  size: src.size,
+                ),
+              );
             }
           }
         } else {
           // Does not exist in source, but exists in target -> delete from target
           if (tgt != null) {
-            actions.add(SyncAction(
-              type: 'delete_tgt',
-              relativePath: path,
-              srcFullPath: '',
-              destFullPath: tgtFull,
-            ));
+            actions.add(
+              SyncAction(
+                type: 'delete_tgt',
+                relativePath: path,
+                srcFullPath: '',
+                destFullPath: tgtFull,
+              ),
+            );
           }
         }
       }
@@ -677,8 +805,11 @@ class SyncLogic extends ChangeNotifier {
       final tgt = targetFiles[path];
       final man = activeManifest[path];
 
-      if ((src != null && src.isInaccessible) || (tgt != null && tgt.isInaccessible)) {
-        _logger.warning('Skipping file $path because it is locked or inaccessible on one of the sides.');
+      if ((src != null && src.isInaccessible) ||
+          (tgt != null && tgt.isInaccessible)) {
+        _logger.warning(
+          'Skipping file $path because it is locked or inaccessible on one of the sides.',
+        );
         continue;
       }
 
@@ -695,82 +826,124 @@ class SyncLogic extends ChangeNotifier {
           if (src == null) {
             final wasDeleted = _isPathDeleted(path, deletions.deletedOnSource);
             if (wasDeleted) {
-              actions.add(SyncAction(type: 'delete_tgt', relativePath: path, srcFullPath: '', destFullPath: tgtFull));
+              actions.add(
+                SyncAction(
+                  type: 'delete_tgt',
+                  relativePath: path,
+                  srcFullPath: '',
+                  destFullPath: tgtFull,
+                ),
+              );
             } else {
               if (tgt != null) {
-                actions.add(SyncAction(
-                    type: tgt.isDirectory ? 'create_dir_src' : 'copy_tgt_to_src',
+                actions.add(
+                  SyncAction(
+                    type: tgt.isDirectory
+                        ? 'create_dir_src'
+                        : 'copy_tgt_to_src',
                     relativePath: path,
                     srcFullPath: tgtFull,
                     destFullPath: srcFull,
-                    size: tgt.size));
+                    size: tgt.size,
+                  ),
+                );
               }
             }
           } else {
-            actions.add(SyncAction(
+            actions.add(
+              SyncAction(
                 type: src.isDirectory ? 'create_dir_tgt' : 'copy_src_to_tgt',
                 relativePath: path,
                 srcFullPath: srcFull,
                 destFullPath: tgtFull,
-                size: src.size));
+                size: src.size,
+              ),
+            );
           }
         } else if (strategy == 'target_wins') {
           if (tgt == null) {
             final wasDeleted = _isPathDeleted(path, deletions.deletedOnTarget);
             if (wasDeleted) {
-              actions.add(SyncAction(type: 'delete_src', relativePath: path, srcFullPath: '', destFullPath: srcFull));
+              actions.add(
+                SyncAction(
+                  type: 'delete_src',
+                  relativePath: path,
+                  srcFullPath: '',
+                  destFullPath: srcFull,
+                ),
+              );
             } else {
               if (src != null) {
-                actions.add(SyncAction(
-                    type: src.isDirectory ? 'create_dir_tgt' : 'copy_src_to_tgt',
+                actions.add(
+                  SyncAction(
+                    type: src.isDirectory
+                        ? 'create_dir_tgt'
+                        : 'copy_src_to_tgt',
                     relativePath: path,
                     srcFullPath: srcFull,
                     destFullPath: tgtFull,
-                    size: src.size));
+                    size: src.size,
+                  ),
+                );
               }
             }
           } else {
-            actions.add(SyncAction(
+            actions.add(
+              SyncAction(
                 type: tgt.isDirectory ? 'create_dir_src' : 'copy_tgt_to_src',
                 relativePath: path,
                 srcFullPath: tgtFull,
                 destFullPath: srcFull,
-                size: tgt.size));
+                size: tgt.size,
+              ),
+            );
           }
         } else {
           // Default: newer_wins
           if (src == null && tgt != null) {
             // Deleted on source, modified/added on target -> Re-copy from target to source
-            actions.add(SyncAction(
+            actions.add(
+              SyncAction(
                 type: tgt.isDirectory ? 'create_dir_src' : 'copy_tgt_to_src',
                 relativePath: path,
                 srcFullPath: tgtFull,
                 destFullPath: srcFull,
-                size: tgt.size));
+                size: tgt.size,
+              ),
+            );
           } else if (tgt == null && src != null) {
             // Deleted on target, modified/added on source -> Re-copy from source to target
-            actions.add(SyncAction(
+            actions.add(
+              SyncAction(
                 type: src.isDirectory ? 'create_dir_tgt' : 'copy_src_to_tgt',
                 relativePath: path,
                 srcFullPath: srcFull,
                 destFullPath: tgtFull,
-                size: src.size));
+                size: src.size,
+              ),
+            );
           } else if (src != null && tgt != null) {
             // Both present, choose newer
             if (src.mtime.isAfter(tgt.mtime)) {
-              actions.add(SyncAction(
+              actions.add(
+                SyncAction(
                   type: src.isDirectory ? 'create_dir_tgt' : 'copy_src_to_tgt',
                   relativePath: path,
                   srcFullPath: srcFull,
                   destFullPath: tgtFull,
-                  size: src.size));
+                  size: src.size,
+                ),
+              );
             } else {
-              actions.add(SyncAction(
+              actions.add(
+                SyncAction(
                   type: tgt.isDirectory ? 'create_dir_src' : 'copy_tgt_to_src',
                   relativePath: path,
                   srcFullPath: tgtFull,
                   destFullPath: srcFull,
-                  size: tgt.size));
+                  size: tgt.size,
+                ),
+              );
             }
           }
         }
@@ -781,25 +954,38 @@ class SyncLogic extends ChangeNotifier {
           // Deleted on source -> Delete on target
           final wasDeleted = _isPathDeleted(path, deletions.deletedOnSource);
           if (wasDeleted) {
-            actions.add(SyncAction(type: 'delete_tgt', relativePath: path, srcFullPath: '', destFullPath: tgtFull));
+            actions.add(
+              SyncAction(
+                type: 'delete_tgt',
+                relativePath: path,
+                srcFullPath: '',
+                destFullPath: tgtFull,
+              ),
+            );
           } else {
             if (tgt != null) {
-              actions.add(SyncAction(
+              actions.add(
+                SyncAction(
                   type: tgt.isDirectory ? 'create_dir_src' : 'copy_tgt_to_src',
                   relativePath: path,
                   srcFullPath: tgtFull,
                   destFullPath: srcFull,
-                  size: tgt.size));
+                  size: tgt.size,
+                ),
+              );
             }
           }
         } else {
           // Added or modified on source -> Copy to target
-          actions.add(SyncAction(
+          actions.add(
+            SyncAction(
               type: src.isDirectory ? 'create_dir_tgt' : 'copy_src_to_tgt',
               relativePath: path,
               srcFullPath: srcFull,
               destFullPath: tgtFull,
-              size: src.size));
+              size: src.size,
+            ),
+          );
         }
       }
       // CASE 3: Changed only on target
@@ -808,25 +994,38 @@ class SyncLogic extends ChangeNotifier {
           // Deleted on target -> Delete on source
           final wasDeleted = _isPathDeleted(path, deletions.deletedOnTarget);
           if (wasDeleted) {
-            actions.add(SyncAction(type: 'delete_src', relativePath: path, srcFullPath: '', destFullPath: srcFull));
+            actions.add(
+              SyncAction(
+                type: 'delete_src',
+                relativePath: path,
+                srcFullPath: '',
+                destFullPath: srcFull,
+              ),
+            );
           } else {
             if (src != null) {
-              actions.add(SyncAction(
+              actions.add(
+                SyncAction(
                   type: src.isDirectory ? 'create_dir_tgt' : 'copy_src_to_tgt',
                   relativePath: path,
                   srcFullPath: srcFull,
                   destFullPath: tgtFull,
-                  size: src.size));
+                  size: src.size,
+                ),
+              );
             }
           }
         } else {
           // Added or modified on target -> Copy to source
-          actions.add(SyncAction(
+          actions.add(
+            SyncAction(
               type: tgt.isDirectory ? 'create_dir_src' : 'copy_tgt_to_src',
               relativePath: path,
               srcFullPath: tgtFull,
               destFullPath: srcFull,
-              size: tgt.size));
+              size: tgt.size,
+            ),
+          );
         }
       }
     }
@@ -854,21 +1053,29 @@ class SyncLogic extends ChangeNotifier {
 
   /// Executes a single synchronization action
   Future<void> _executeAction(
-    SyncAction action, 
+    SyncAction action,
     Function(int bytesWritten) onProgress,
     List<Map<String, String>> pendingHistory,
   ) async {
     try {
-      if (action.type == 'copy_src_to_tgt' || action.type == 'copy_tgt_to_src') {
-        await _copyFileWithProgress(action.srcFullPath, action.destFullPath, onProgress);
+      if (action.type == 'copy_src_to_tgt' ||
+          action.type == 'copy_tgt_to_src') {
+        await _copyFileWithProgress(
+          action.srcFullPath,
+          action.destFullPath,
+          onProgress,
+        );
         pendingHistory.add({
           'time': formatTimestampDisplay(),
           'action': 'COPY',
           'file': action.relativePath,
-          'details': action.type == 'copy_src_to_tgt' ? 'Source -> Target' : 'Target -> Source',
+          'details': action.type == 'copy_src_to_tgt'
+              ? 'Source -> Target'
+              : 'Target -> Source',
           'status': 'SUCCESS',
         });
-      } else if (action.type == 'create_dir_src' || action.type == 'create_dir_tgt') {
+      } else if (action.type == 'create_dir_src' ||
+          action.type == 'create_dir_tgt') {
         final dir = Directory(action.destFullPath);
         if (!await dir.exists()) {
           await dir.create(recursive: true);
@@ -883,19 +1090,25 @@ class SyncLogic extends ChangeNotifier {
             'time': formatTimestampDisplay(),
             'action': 'DELETE',
             'file': action.relativePath,
-            'details': action.type == 'delete_src' ? 'From Source' : 'From Target',
+            'details': action.type == 'delete_src'
+                ? 'From Source'
+                : 'From Target',
             'status': 'SUCCESS',
           });
         } else {
           final dir = Directory(action.destFullPath);
           if (await dir.exists()) {
             await dir.delete(recursive: true);
-            _logger.fine('Deleted directory recursively: ${action.destFullPath}');
+            _logger.fine(
+              'Deleted directory recursively: ${action.destFullPath}',
+            );
           }
         }
       }
     } catch (e) {
-      _logger.warning('Failed to execute sync action [${action.type}] for ${action.relativePath}: $e');
+      _logger.warning(
+        'Failed to execute sync action [${action.type}] for ${action.relativePath}: $e',
+      );
       pendingHistory.add({
         'time': formatTimestampDisplay(),
         'action': action.type.startsWith('copy') ? 'COPY' : 'DELETE',
@@ -920,18 +1133,26 @@ class SyncLogic extends ChangeNotifier {
     while (attempt < maxRetries) {
       attempt++;
       final tempPath = '$destPath.ja_sync_tmp';
+      final backupPath = '$destPath.ja_sync_bak';
       final tempFile = File(tempPath);
+      final backupFile = File(backupPath);
       final destFile = File(destPath);
       final srcFile = File(srcPath);
+      bool backedUp = false;
 
       try {
         // Ensure destination parent directory exists
         await tempFile.parent.create(recursive: true);
 
-        // Remove old stale temp file if present
+        // Remove old stale temp/backup files if present
         if (await tempFile.exists()) {
           try {
             await tempFile.delete();
+          } catch (_) {}
+        }
+        if (await backupFile.exists()) {
+          try {
+            await backupFile.delete();
           } catch (_) {}
         }
 
@@ -969,14 +1190,18 @@ class SyncLogic extends ChangeNotifier {
         final tempStat = await tempFile.stat();
 
         if (srcStat.size != tempStat.size) {
-          throw FileSystemException('Copy size mismatch: expected ${srcStat.size} bytes, wrote ${tempStat.size} bytes', tempPath);
+          throw FileSystemException(
+            'Copy size mismatch: expected ${srcStat.size} bytes, wrote ${tempStat.size} bytes',
+            tempPath,
+          );
         }
 
-        // Atomically replace target file
+        // Atomically replace target file: move the existing file aside
+        // first rather than deleting it outright, so a failed rename can
+        // never leave the destination missing.
         if (await destFile.exists()) {
-          try {
-            await destFile.delete();
-          } catch (_) {}
+          await destFile.rename(backupPath);
+          backedUp = true;
         }
         await tempFile.rename(destPath);
 
@@ -984,10 +1209,26 @@ class SyncLogic extends ChangeNotifier {
         final finalDestFile = File(destPath);
         await finalDestFile.setLastModified(srcStat.modified);
 
+        // Success: the new file is safely in place, drop the backup
+        if (backedUp && await backupFile.exists()) {
+          try {
+            await backupFile.delete();
+          } catch (_) {}
+        }
+
         _logger.fine('Copied atomically: $srcPath -> $destPath');
         return; // Success!
       } catch (e) {
         lastException = e is Exception ? e : Exception(e.toString());
+
+        // If we moved the original file aside but never completed the
+        // swap, restore it so the destination isn't left missing.
+        if (backedUp && !await destFile.exists() && await backupFile.exists()) {
+          try {
+            await backupFile.rename(destPath);
+          } catch (_) {}
+        }
+
         // Clean up temp file on failure
         if (await tempFile.exists()) {
           try {
@@ -995,7 +1236,9 @@ class SyncLogic extends ChangeNotifier {
           } catch (_) {}
         }
 
-        _logger.warning('Copy attempt $attempt/$maxRetries failed for $srcPath: $e');
+        _logger.warning(
+          'Copy attempt $attempt/$maxRetries failed for $srcPath: $e',
+        );
         if (attempt < maxRetries) {
           await Future.delayed(Duration(milliseconds: 300 * attempt));
         }
@@ -1039,14 +1282,21 @@ class SyncLogic extends ChangeNotifier {
       data.forEach((k, v) {
         jsonMap[k] = v.toJson();
       });
-      file.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(jsonMap));
+      file.writeAsStringSync(
+        const JsonEncoder.withIndent('  ').convert(jsonMap),
+      );
     } catch (e) {
       _logger.severe('Failed to write manifest file: $e');
     }
   }
 
   /// Write sync history log
-  void _writeHistoryLog(String actionType, String source, String target, String details) {
+  void _writeHistoryLog(
+    String actionType,
+    String source,
+    String target,
+    String details,
+  ) {
     try {
       final exeDir = _getExeDir();
       final logDir = Directory(p.join(exeDir, 'logs'));
@@ -1065,7 +1315,9 @@ class SyncLogic extends ChangeNotifier {
   }
 
   /// Write structured JSON sync history entries in batch
-  Future<void> _saveHistoryEntriesBatch(List<Map<String, String>> newEntries) async {
+  Future<void> _saveHistoryEntriesBatch(
+    List<Map<String, String>> newEntries,
+  ) async {
     if (newEntries.isEmpty) return;
     try {
       final exeDir = _getExeDir();
@@ -1089,7 +1341,9 @@ class SyncLogic extends ChangeNotifier {
         entries = entries.sublist(0, 200);
       }
 
-      await historyFile.writeAsString(const JsonEncoder.withIndent('  ').convert(entries));
+      await historyFile.writeAsString(
+        const JsonEncoder.withIndent('  ').convert(entries),
+      );
     } catch (e) {
       _logger.warning('Failed to save history batch: $e');
     }
@@ -1109,7 +1363,7 @@ class SyncLogic extends ChangeNotifier {
         'file': file,
         'details': details,
         'status': status,
-      }
+      },
     ]);
   }
 
@@ -1169,7 +1423,7 @@ class SyncLogic extends ChangeNotifier {
 
   void _recordDeletion(String pairId, String relPath, bool isSource) {
     final exeDir = _getExeDir();
-    final file = File(p.join(exeDir, 'deletions_${pairId}.json'));
+    final file = File(p.join(exeDir, 'deletions_$pairId.json'));
     final deletions = _loadDeletions(file);
     if (isSource) {
       deletions.deletedOnSource.add(relPath);
@@ -1194,8 +1448,5 @@ class PairDeletions {
   final Set<String> deletedOnSource;
   final Set<String> deletedOnTarget;
 
-  PairDeletions({
-    required this.deletedOnSource,
-    required this.deletedOnTarget,
-  });
+  PairDeletions({required this.deletedOnSource, required this.deletedOnTarget});
 }

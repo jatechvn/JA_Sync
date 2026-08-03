@@ -11,7 +11,6 @@ import '../i18n.dart';
 import 'styles.dart';
 import '../utils.dart';
 import '../logic.dart';
-import '../constants.dart';
 import '../build_info.dart';
 import '../../services/settings_service.dart';
 
@@ -27,6 +26,10 @@ class _AddSyncPairDialogState extends State<AddSyncPairDialog> {
   final _sourceController = TextEditingController();
   final _targetController = TextEditingController();
   String _strategy = 'newer_wins';
+  String _syncMode = 'two_way';
+  String _schedule = 'manual';
+  List<String> _excludes = [];
+  String? _selectedProfileKey;
   String _errorMessage = '';
 
   @override
@@ -37,7 +40,7 @@ class _AddSyncPairDialogState extends State<AddSyncPairDialog> {
   }
 
   Future<void> _pickFolder(TextEditingController controller) async {
-    final result = await FilePicker.platform.getDirectoryPath(
+    final result = await FilePicker.getDirectoryPath(
       dialogTitle: 'Select Directory',
     );
     if (result != null) {
@@ -46,6 +49,41 @@ class _AddSyncPairDialogState extends State<AddSyncPairDialog> {
         _errorMessage = '';
       });
     }
+  }
+
+  String _scheduleLabel(String schedule, AppStrings s) {
+    switch (schedule) {
+      case 'realtime':
+        return s.optSchedRealtime;
+      case '15m':
+        return s.optSched15m;
+      case '1h':
+        return s.optSched1h;
+      case '12h':
+        return s.optSched12h;
+      case '24h':
+        return s.optSched24h;
+      default:
+        return s.optSchedManual;
+    }
+  }
+
+  void _applyProfile(String? key) {
+    setState(() {
+      _selectedProfileKey = key;
+      if (key == null) {
+        _strategy = 'newer_wins';
+        _syncMode = 'two_way';
+        _schedule = 'manual';
+        _excludes = [];
+        return;
+      }
+      final profile = AppConfig.allProfiles.firstWhere((p) => p.key == key);
+      _strategy = profile.conflictStrategy;
+      _syncMode = profile.syncMode;
+      _schedule = profile.schedule;
+      _excludes = profile.excludes;
+    });
   }
 
   void _validateAndSubmit(AppStrings s) {
@@ -74,6 +112,9 @@ class _AddSyncPairDialogState extends State<AddSyncPairDialog> {
       'source': src,
       'target': tgt,
       'strategy': _strategy,
+      'syncMode': _syncMode,
+      'schedule': _schedule,
+      'excludes': _excludes,
     });
   }
 
@@ -126,8 +167,10 @@ class _AddSyncPairDialogState extends State<AddSyncPairDialog> {
                     controller: _targetController,
                     decoration: InputDecoration(
                       labelText: s.labelTarget,
-                      prefixIcon:
-                          const Icon(Icons.folder_shared_outlined, size: 20),
+                      prefixIcon: const Icon(
+                        Icons.folder_shared_outlined,
+                        size: 20,
+                      ),
                     ),
                   ),
                 ),
@@ -139,6 +182,55 @@ class _AddSyncPairDialogState extends State<AddSyncPairDialog> {
                 ),
               ],
             ),
+            const SizedBox(height: 16),
+
+            // Profile Selector (optional)
+            Text(
+              s.labelApplyProfile,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: c.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: c.bgTertiary,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: c.borderDefault),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String?>(
+                  value: _selectedProfileKey,
+                  dropdownColor: c.bgSecondary,
+                  style: TextStyle(color: c.textPrimary, fontSize: 13),
+                  isExpanded: true,
+                  hint: Text(s.optNoProfile),
+                  items: [
+                    DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text(s.optNoProfile),
+                    ),
+                    for (final profile in AppConfig.allProfiles)
+                      DropdownMenuItem<String?>(
+                        value: profile.key,
+                        child: Text(profile.displayName(s)),
+                      ),
+                  ],
+                  onChanged: _applyProfile,
+                ),
+              ),
+            ),
+            if (_selectedProfileKey != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                '${_syncMode == 'one_way' ? s.optOneWay : s.optTwoWay} · ${_scheduleLabel(_schedule, s)}'
+                '${_excludes.isNotEmpty ? ' · ${_excludes.length} ${s.labelExcludes}' : ''}',
+                style: TextStyle(color: c.textMuted, fontSize: 11),
+              ),
+            ],
             const SizedBox(height: 16),
 
             // Strategy Selector
@@ -290,47 +382,54 @@ class _CloseActionDialogState extends State<CloseActionDialog> {
           children: [
             Text(
               s.dlgCloseDesc,
-              style: TextStyle(color: c.textSecondary, fontSize: 13, height: 1.4),
+              style: TextStyle(
+                color: c.textSecondary,
+                fontSize: 13,
+                height: 1.4,
+              ),
             ),
             const SizedBox(height: 16),
 
-            // Radio Minimize
-            RadioListTile<String>(
-              title: Text(
-                s.optMinimizeToTray,
-                style: TextStyle(color: c.textPrimary, fontSize: 13),
-              ),
-              value: 'minimize',
+            RadioGroup<String>(
               groupValue: _selectedAction,
-              activeColor: c.linkAccent,
-              contentPadding: EdgeInsets.zero,
               onChanged: (val) {
                 if (val != null) setState(() => _selectedAction = val);
               },
+              child: Column(
+                children: [
+                  RadioListTile<String>(
+                    title: Text(
+                      s.optMinimizeToTray,
+                      style: TextStyle(color: c.textPrimary, fontSize: 13),
+                    ),
+                    value: 'minimize',
+                    activeColor: c.linkAccent,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  RadioListTile<String>(
+                    title: Text(
+                      s.optExitApp,
+                      style: TextStyle(color: c.textPrimary, fontSize: 13),
+                    ),
+                    value: 'exit',
+                    activeColor: c.linkAccent,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ],
+              ),
             ),
 
-            // Radio Exit
-            RadioListTile<String>(
-              title: Text(
-                s.optExitApp,
-                style: TextStyle(color: c.textPrimary, fontSize: 13),
-              ),
-              value: 'exit',
-              groupValue: _selectedAction,
-              activeColor: c.linkAccent,
-              contentPadding: EdgeInsets.zero,
-              onChanged: (val) {
-                if (val != null) setState(() => _selectedAction = val);
-              },
-            ),
-            
             const Divider(height: 24),
 
             // Checkbox Remember
             CheckboxListTile(
               title: Text(
                 s.labelRememberChoice,
-                style: TextStyle(color: c.textPrimary, fontSize: 13, fontWeight: FontWeight.w500),
+                style: TextStyle(
+                  color: c.textPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
               value: _rememberChoice,
               activeColor: c.linkAccent,
@@ -401,7 +500,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
     _themeMode = widget.themeNotifier.mode;
     _language = widget.languageNotifier.current;
     _closeAction = AppConfig.get('close_action', defaultValue: 'ask');
-    _speedLimit = int.tryParse(AppConfig.get('speed_limit', defaultValue: '0')) ?? 0;
+    _speedLimit =
+        int.tryParse(AppConfig.get('speed_limit', defaultValue: '0')) ?? 0;
     _startMinimized = AppConfig.getBool('start_minimized', defaultValue: false);
     _loadStoredSettings();
     _loadStartupStatus();
@@ -504,11 +604,13 @@ class _SettingsDialogState extends State<SettingsDialog> {
                     children: [
                       const Icon(Icons.tune_rounded, size: 16),
                       const SizedBox(width: 6),
-                      Text(s.lang == AppLanguage.vi
-                          ? 'Cài đặt'
-                          : s.lang == AppLanguage.zh
-                              ? '设置'
-                              : 'Advanced'),
+                      Text(
+                        s.lang == AppLanguage.vi
+                            ? 'Cài đặt'
+                            : s.lang == AppLanguage.zh
+                            ? '设置'
+                            : 'Advanced',
+                      ),
                     ],
                   ),
                 ),
@@ -518,11 +620,13 @@ class _SettingsDialogState extends State<SettingsDialog> {
                     children: [
                       const Icon(Icons.menu_book_rounded, size: 16),
                       const SizedBox(width: 6),
-                      Text(s.lang == AppLanguage.vi
-                          ? 'Hướng dẫn'
-                          : s.lang == AppLanguage.zh
-                              ? '指南'
-                              : 'User Guide'),
+                      Text(
+                        s.lang == AppLanguage.vi
+                            ? 'Hướng dẫn'
+                            : s.lang == AppLanguage.zh
+                            ? '指南'
+                            : 'User Guide',
+                      ),
                     ],
                   ),
                 ),
@@ -532,11 +636,13 @@ class _SettingsDialogState extends State<SettingsDialog> {
                     children: [
                       const Icon(Icons.info_outline_rounded, size: 16),
                       const SizedBox(width: 6),
-                      Text(s.lang == AppLanguage.vi
-                          ? 'Giới thiệu'
-                          : s.lang == AppLanguage.zh
-                              ? '关于'
-                              : 'About'),
+                      Text(
+                        s.lang == AppLanguage.vi
+                            ? 'Giới thiệu'
+                            : s.lang == AppLanguage.zh
+                            ? '关于'
+                            : 'About',
+                      ),
                     ],
                   ),
                 ),
@@ -580,7 +686,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
                             )
                           : Switch(
                               value: _startWithWindows,
-                              activeTrackColor: c.linkAccent.withValues(alpha: 0.5),
+                              activeTrackColor: c.linkAccent.withValues(
+                                alpha: 0.5,
+                              ),
                               activeThumbColor: c.linkAccent,
                               onChanged: _toggleStartup,
                             ),
@@ -625,7 +733,10 @@ class _SettingsDialogState extends State<SettingsDialog> {
                             child: DropdownButton<String>(
                               value: _closeAction,
                               dropdownColor: c.bgSecondary,
-                              style: TextStyle(color: c.textPrimary, fontSize: 13),
+                              style: TextStyle(
+                                color: c.textPrimary,
+                                fontSize: 13,
+                              ),
                               isDense: true,
                               items: [
                                 DropdownMenuItem(
@@ -654,8 +765,6 @@ class _SettingsDialogState extends State<SettingsDialog> {
                     ),
                     const SizedBox(height: 16),
 
-
-
                     // Speed Limit
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -676,16 +785,21 @@ class _SettingsDialogState extends State<SettingsDialog> {
                             child: DropdownButton<int>(
                               value: _speedLimit,
                               dropdownColor: c.bgSecondary,
-                              style: TextStyle(color: c.textPrimary, fontSize: 13),
+                              style: TextStyle(
+                                color: c.textPrimary,
+                                fontSize: 13,
+                              ),
                               isDense: true,
                               items: [
                                 DropdownMenuItem(
                                   value: 0,
-                                  child: Text(s.lang == AppLanguage.vi
-                                      ? 'Không giới hạn'
-                                      : s.lang == AppLanguage.zh
-                                          ? '无限制'
-                                          : 'Unlimited'),
+                                  child: Text(
+                                    s.lang == AppLanguage.vi
+                                        ? 'Không giới hạn'
+                                        : s.lang == AppLanguage.zh
+                                        ? '无限制'
+                                        : 'Unlimited',
+                                  ),
                                 ),
                                 const DropdownMenuItem(
                                   value: 1,
@@ -706,7 +820,10 @@ class _SettingsDialogState extends State<SettingsDialog> {
                               ],
                               onChanged: (val) async {
                                 if (val != null) {
-                                  await AppConfig.set('speed_limit', val.toString());
+                                  await AppConfig.set(
+                                    'speed_limit',
+                                    val.toString(),
+                                  );
                                   setState(() => _speedLimit = val);
                                 }
                               },
@@ -752,7 +869,10 @@ class _SettingsDialogState extends State<SettingsDialog> {
                             child: DropdownButton<AppThemeMode>(
                               value: _themeMode,
                               dropdownColor: c.bgSecondary,
-                              style: TextStyle(color: c.textPrimary, fontSize: 13),
+                              style: TextStyle(
+                                color: c.textPrimary,
+                                fontSize: 13,
+                              ),
                               isDense: true,
                               items: [
                                 DropdownMenuItem(
@@ -804,7 +924,10 @@ class _SettingsDialogState extends State<SettingsDialog> {
                             child: DropdownButton<AppLanguage>(
                               value: _language,
                               dropdownColor: c.bgSecondary,
-                              style: TextStyle(color: c.textPrimary, fontSize: 13),
+                              style: TextStyle(
+                                color: c.textPrimary,
+                                fontSize: 13,
+                              ),
                               isDense: true,
                               items: [
                                 DropdownMenuItem(
@@ -849,8 +972,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
                           s.lang == AppLanguage.vi
                               ? 'Tùy chỉnh Glassmorphism (Blur & Opacity)'
                               : s.lang == AppLanguage.zh
-                                  ? 'Glassmorphism 自定义 (模糊 & 不透明度)'
-                                  : 'Glassmorphism Customization (Blur & Opacity)',
+                              ? 'Glassmorphism 自定义 (模糊 & 不透明度)'
+                              : 'Glassmorphism Customization (Blur & Opacity)',
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
@@ -863,47 +986,63 @@ class _SettingsDialogState extends State<SettingsDialog> {
                             children: [
                               Text(
                                 'App Background Blur (Sigma: ${_bgBlur.toStringAsFixed(1)})',
-                                style: TextStyle(color: c.textSecondary, fontSize: 12),
+                                style: TextStyle(
+                                  color: c.textSecondary,
+                                  fontSize: 12,
+                                ),
                               ),
                               Slider(
                                 value: _bgBlur,
                                 min: 0.0,
                                 max: 30.0,
                                 activeColor: c.linkAccent,
-                                onChanged: (val) => setState(() => _bgBlur = val),
+                                onChanged: (val) =>
+                                    setState(() => _bgBlur = val),
                               ),
                               Text(
                                 'App Background Opacity (${(_bgOpacity * 100).round()}%)',
-                                style: TextStyle(color: c.textSecondary, fontSize: 12),
+                                style: TextStyle(
+                                  color: c.textSecondary,
+                                  fontSize: 12,
+                                ),
                               ),
                               Slider(
                                 value: _bgOpacity,
                                 min: 0.1,
                                 max: 1.0,
                                 activeColor: c.linkAccent,
-                                onChanged: (val) => setState(() => _bgOpacity = val),
+                                onChanged: (val) =>
+                                    setState(() => _bgOpacity = val),
                               ),
                               Text(
                                 'Popup Dialog Blur (Sigma: ${_dialogBlur.toStringAsFixed(1)})',
-                                style: TextStyle(color: c.textSecondary, fontSize: 12),
+                                style: TextStyle(
+                                  color: c.textSecondary,
+                                  fontSize: 12,
+                                ),
                               ),
                               Slider(
                                 value: _dialogBlur,
                                 min: 0.0,
                                 max: 30.0,
                                 activeColor: c.linkAccent,
-                                onChanged: (val) => setState(() => _dialogBlur = val),
+                                onChanged: (val) =>
+                                    setState(() => _dialogBlur = val),
                               ),
                               Text(
                                 'Popup Dialog Opacity (${(_dialogOpacity * 100).round()}%)',
-                                style: TextStyle(color: c.textSecondary, fontSize: 12),
+                                style: TextStyle(
+                                  color: c.textSecondary,
+                                  fontSize: 12,
+                                ),
                               ),
                               Slider(
                                 value: _dialogOpacity,
                                 min: 0.1,
                                 max: 1.0,
                                 activeColor: c.linkAccent,
-                                onChanged: (val) => setState(() => _dialogOpacity = val),
+                                onChanged: (val) =>
+                                    setState(() => _dialogOpacity = val),
                               ),
                               const SizedBox(height: 12),
                             ],
@@ -922,8 +1061,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
                       s.lang == AppLanguage.vi
                           ? 'Nhập & Xuất Cấu Hình JSON'
                           : s.lang == AppLanguage.zh
-                              ? '导入/导出 JSON 配置'
-                              : 'Import & Export JSON Config',
+                          ? '导入/导出 JSON 配置'
+                          : 'Import & Export JSON Config',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
@@ -938,37 +1077,41 @@ class _SettingsDialogState extends State<SettingsDialog> {
                         Expanded(
                           child: OutlinedButton.icon(
                             onPressed: () async {
-                              final destPath = await FilePicker.platform.saveFile(
+                              final destPath = await FilePicker.saveFile(
                                 dialogTitle: s.lang == AppLanguage.vi
                                     ? 'Chọn nơi lưu cấu hình'
                                     : s.lang == AppLanguage.zh
-                                        ? '选择保存配置的位置'
-                                        : 'Select location to save configuration',
+                                    ? '选择保存配置的位置'
+                                    : 'Select location to save configuration',
                                 fileName: 'ja_sync_config.json',
                                 type: FileType.custom,
                                 allowedExtensions: ['json'],
                               );
                               if (destPath != null) {
                                 await AppConfig.exportConfig(destPath);
-                                if (mounted) {
+                                if (context.mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
-                                      content: Text(s.lang == AppLanguage.vi
-                                          ? 'Xuất cấu hình thành công!'
-                                          : s.lang == AppLanguage.zh
-                                              ? '成功导出配置！'
-                                              : 'Configuration exported successfully!'),
+                                      content: Text(
+                                        s.lang == AppLanguage.vi
+                                            ? 'Xuất cấu hình thành công!'
+                                            : s.lang == AppLanguage.zh
+                                            ? '成功导出配置！'
+                                            : 'Configuration exported successfully!',
+                                      ),
                                     ),
                                   );
                                 }
                               }
                             },
                             icon: const Icon(Icons.upload_rounded, size: 16),
-                            label: Text(s.lang == AppLanguage.vi
-                                ? 'Xuất'
-                                : s.lang == AppLanguage.zh
-                                    ? '导出'
-                                    : 'Export'),
+                            label: Text(
+                              s.lang == AppLanguage.vi
+                                  ? 'Xuất'
+                                  : s.lang == AppLanguage.zh
+                                  ? '导出'
+                                  : 'Export',
+                            ),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 10),
                             ),
@@ -978,32 +1121,39 @@ class _SettingsDialogState extends State<SettingsDialog> {
                         Expanded(
                           child: OutlinedButton.icon(
                             onPressed: () async {
-                              final result = await FilePicker.platform.pickFiles(
+                              final result = await FilePicker.pickFiles(
                                 dialogTitle: s.lang == AppLanguage.vi
                                     ? 'Chọn tệp cấu hình JSON'
                                     : s.lang == AppLanguage.zh
-                                        ? '选择 JSON 配置文件'
-                                        : 'Select JSON configuration file',
+                                    ? '选择 JSON 配置文件'
+                                    : 'Select JSON configuration file',
                                 type: FileType.custom,
                                 allowedExtensions: ['json'],
                               );
-                              if (result != null && result.files.single.path != null) {
-                                final success = await AppConfig.importConfig(result.files.single.path!);
-                                if (mounted) {
+                              if (result != null &&
+                                  result.files.single.path != null) {
+                                final success = await AppConfig.importConfig(
+                                  result.files.single.path!,
+                                );
+                                if (context.mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
-                                      content: Text(success
-                                          ? (s.lang == AppLanguage.vi
-                                              ? 'Nhập cấu hình thành công! Hãy khởi động lại ứng dụng nếu cần.'
-                                              : s.lang == AppLanguage.zh
+                                      content: Text(
+                                        success
+                                            ? (s.lang == AppLanguage.vi
+                                                  ? 'Nhập cấu hình thành công! Hãy khởi động lại ứng dụng nếu cần.'
+                                                  : s.lang == AppLanguage.zh
                                                   ? '配置导入成功！如果需要，请重启应用。'
                                                   : 'Configuration imported successfully! Restart the app if needed.')
-                                          : (s.lang == AppLanguage.vi
-                                              ? 'Nhập cấu hình thất bại! Định dạng file không hợp lệ.'
-                                              : s.lang == AppLanguage.zh
+                                            : (s.lang == AppLanguage.vi
+                                                  ? 'Nhập cấu hình thất bại! Định dạng file không hợp lệ.'
+                                                  : s.lang == AppLanguage.zh
                                                   ? '导入配置失败！文件格式无效。'
-                                                  : 'Failed to import configuration! Invalid file format.')),
-                                      backgroundColor: success ? c.statusActive : c.statusRemoved,
+                                                  : 'Failed to import configuration! Invalid file format.'),
+                                      ),
+                                      backgroundColor: success
+                                          ? c.statusActive
+                                          : c.statusRemoved,
                                     ),
                                   );
                                   if (success) {
@@ -1013,11 +1163,13 @@ class _SettingsDialogState extends State<SettingsDialog> {
                               }
                             },
                             icon: const Icon(Icons.download_rounded, size: 16),
-                            label: Text(s.lang == AppLanguage.vi
-                                ? 'Nhập'
-                                : s.lang == AppLanguage.zh
-                                    ? '导入'
-                                    : 'Import'),
+                            label: Text(
+                              s.lang == AppLanguage.vi
+                                  ? 'Nhập'
+                                  : s.lang == AppLanguage.zh
+                                  ? '导入'
+                                  : 'Import',
+                            ),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 10),
                             ),
@@ -1040,8 +1192,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
                       s.lang == AppLanguage.vi
                           ? 'Hướng dẫn & Mẹo sử dụng'
                           : s.lang == AppLanguage.zh
-                              ? '使用指南与技巧'
-                              : 'Guide & Tips',
+                          ? '使用指南与技巧'
+                          : 'Guide & Tips',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.bold,
@@ -1051,7 +1203,11 @@ class _SettingsDialogState extends State<SettingsDialog> {
                     const SizedBox(height: 8),
                     Text(
                       s.guideContent,
-                      style: TextStyle(color: c.textPrimary, fontSize: 13, height: 1.5),
+                      style: TextStyle(
+                        color: c.textPrimary,
+                        fontSize: 13,
+                        height: 1.5,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     Container(
@@ -1059,20 +1215,30 @@ class _SettingsDialogState extends State<SettingsDialog> {
                       decoration: BoxDecoration(
                         color: c.linkAccent.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: c.linkAccent.withValues(alpha: 0.15)),
+                        border: Border.all(
+                          color: c.linkAccent.withValues(alpha: 0.15),
+                        ),
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.tips_and_updates_outlined, color: c.linkAccent, size: 20),
+                          Icon(
+                            Icons.tips_and_updates_outlined,
+                            color: c.linkAccent,
+                            size: 20,
+                          ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               s.lang == AppLanguage.vi
                                   ? 'Mẹo: Bạn có thể cài đặt tốc độ giới hạn băng thông trong tab Cài đặt để không ảnh hưởng tới mạng cục bộ.'
                                   : s.lang == AppLanguage.zh
-                                      ? '提示：您可以在设置选项卡中设置带宽限制，以免影响局域网。'
-                                      : 'Tip: You can set a bandwidth limit in the Settings tab to avoid impacting your local network performance.',
-                              style: TextStyle(color: c.textPrimary, fontSize: 12, height: 1.4),
+                                  ? '提示：您可以在设置选项卡中设置带宽限制，以免影响局域网。'
+                                  : 'Tip: You can set a bandwidth limit in the Settings tab to avoid impacting your local network performance.',
+                              style: TextStyle(
+                                color: c.textPrimary,
+                                fontSize: 12,
+                                height: 1.4,
+                              ),
                             ),
                           ),
                         ],
@@ -1091,7 +1257,11 @@ class _SettingsDialogState extends State<SettingsDialog> {
                     Center(
                       child: Column(
                         children: [
-                          Icon(Icons.sync_rounded, color: c.linkAccent, size: 48),
+                          Icon(
+                            Icons.sync_rounded,
+                            color: c.linkAccent,
+                            size: 48,
+                          ),
                           const SizedBox(height: 8),
                           Text(
                             'JA Sync Manager',
@@ -1108,9 +1278,12 @@ class _SettingsDialogState extends State<SettingsDialog> {
                           if (BuildInfo.isDebug) ...[
                             const SizedBox(height: 4),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
-                                color: Colors.amber.withOpacity(0.2),
+                                color: Colors.amber.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(
@@ -1131,7 +1304,11 @@ class _SettingsDialogState extends State<SettingsDialog> {
                     const SizedBox(height: 12),
                     Text(
                       s.aboutContent,
-                      style: TextStyle(color: c.textSecondary, fontSize: 13, height: 1.4),
+                      style: TextStyle(
+                        color: c.textSecondary,
+                        fontSize: 13,
+                        height: 1.4,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     Container(
@@ -1146,8 +1323,23 @@ class _SettingsDialogState extends State<SettingsDialog> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text('Build Mode:', style: TextStyle(color: c.textMuted, fontSize: 12)),
-                              Text(BuildInfo.modeName, style: TextStyle(color: BuildInfo.isDebug ? Colors.amber : c.linkAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+                              Text(
+                                'Build Mode:',
+                                style: TextStyle(
+                                  color: c.textMuted,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              Text(
+                                BuildInfo.modeName,
+                                style: TextStyle(
+                                  color: BuildInfo.isDebug
+                                      ? Colors.amber
+                                      : c.linkAccent,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ],
                           ),
                           if (BuildInfo.isDebug) ...[
@@ -1155,8 +1347,21 @@ class _SettingsDialogState extends State<SettingsDialog> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text('Debug Timestamp:', style: TextStyle(color: c.textMuted, fontSize: 12)),
-                                Text(BuildInfo.debugTimestamp, style: TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.bold)),
+                                Text(
+                                  'Debug Timestamp:',
+                                  style: TextStyle(
+                                    color: c.textMuted,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                Text(
+                                  BuildInfo.debugTimestamp,
+                                  style: TextStyle(
+                                    color: Colors.amber,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                               ],
                             ),
                           ],
@@ -1164,24 +1369,63 @@ class _SettingsDialogState extends State<SettingsDialog> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text('Tech Stack:', style: TextStyle(color: c.textMuted, fontSize: 12)),
-                              Text('Flutter 3.x / Dart 3.x', style: TextStyle(color: c.textPrimary, fontSize: 12, fontWeight: FontWeight.bold)),
+                              Text(
+                                'Tech Stack:',
+                                style: TextStyle(
+                                  color: c.textMuted,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              Text(
+                                'Flutter 3.x / Dart 3.x',
+                                style: TextStyle(
+                                  color: c.textPrimary,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ],
                           ),
                           const SizedBox(height: 6),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text('Developer / Author:', style: TextStyle(color: c.textMuted, fontSize: 12)),
-                              Text(_licenseAuthor, style: TextStyle(color: c.textPrimary, fontSize: 12, fontWeight: FontWeight.bold)),
+                              Text(
+                                'Developer / Author:',
+                                style: TextStyle(
+                                  color: c.textMuted,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              Text(
+                                _licenseAuthor,
+                                style: TextStyle(
+                                  color: c.textPrimary,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ],
                           ),
                           const SizedBox(height: 6),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text('Managed By:', style: TextStyle(color: c.textMuted, fontSize: 12)),
-                              Text('JA Auto Git', style: TextStyle(color: c.textPrimary, fontSize: 12, fontWeight: FontWeight.bold)),
+                              Text(
+                                'Managed By:',
+                                style: TextStyle(
+                                  color: c.textMuted,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              Text(
+                                'JA Auto Git',
+                                style: TextStyle(
+                                  color: c.textPrimary,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ],
                           ),
                         ],
@@ -1196,19 +1440,23 @@ class _SettingsDialogState extends State<SettingsDialog> {
         actions: [
           OutlinedButton(
             onPressed: _resetToDefaults,
-            child: Text(s.lang == AppLanguage.vi
-                ? 'Khôi phục mặc định'
-                : s.lang == AppLanguage.zh
-                    ? '恢复默认'
-                    : 'Reset Defaults'),
+            child: Text(
+              s.lang == AppLanguage.vi
+                  ? 'Khôi phục mặc định'
+                  : s.lang == AppLanguage.zh
+                  ? '恢复默认'
+                  : 'Reset Defaults',
+            ),
           ),
           ElevatedButton(
             onPressed: _saveSettings,
-            child: Text(s.lang == AppLanguage.vi
-                ? 'Lưu cài đặt'
-                : s.lang == AppLanguage.zh
-                    ? '保存设置'
-                    : 'Save Settings'),
+            child: Text(
+              s.lang == AppLanguage.vi
+                  ? 'Lưu cài đặt'
+                  : s.lang == AppLanguage.zh
+                  ? '保存设置'
+                  : 'Save Settings',
+            ),
           ),
         ],
       ),
@@ -1259,8 +1507,8 @@ class AboutGuideDialog extends StatelessWidget {
                 s.lang == AppLanguage.vi
                     ? 'Hướng dẫn & Mẹo sử dụng'
                     : s.lang == AppLanguage.zh
-                        ? '使用指南与技巧'
-                        : 'Guide & Tips',
+                    ? '使用指南与技巧'
+                    : 'Guide & Tips',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
@@ -1270,7 +1518,11 @@ class AboutGuideDialog extends StatelessWidget {
               const SizedBox(height: 8),
               Text(
                 s.guideContent,
-                style: TextStyle(color: c.textPrimary, fontSize: 13, height: 1.5),
+                style: TextStyle(
+                  color: c.textPrimary,
+                  fontSize: 13,
+                  height: 1.5,
+                ),
               ),
               const SizedBox(height: 16),
               Container(
@@ -1278,20 +1530,30 @@ class AboutGuideDialog extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: c.linkAccent.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: c.linkAccent.withValues(alpha: 0.15)),
+                  border: Border.all(
+                    color: c.linkAccent.withValues(alpha: 0.15),
+                  ),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.tips_and_updates_outlined, color: c.linkAccent, size: 20),
+                    Icon(
+                      Icons.tips_and_updates_outlined,
+                      color: c.linkAccent,
+                      size: 20,
+                    ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
                         s.lang == AppLanguage.vi
                             ? 'Mẹo: Bạn có thể cài đặt tốc độ giới hạn băng thông trong hộp thoại Cài đặt (Settings) để không ảnh hưởng tới mạng cục bộ.'
                             : s.lang == AppLanguage.zh
-                                ? '提示：您可以在“设置”对话框中设置带宽限制，以免影响局域网。'
-                                : 'Tip: You can set a bandwidth limit in the Settings dialog to avoid impacting your local network performance.',
-                        style: TextStyle(color: c.textPrimary, fontSize: 12, height: 1.4),
+                            ? '提示：您可以在“设置”对话框中设置带宽限制，以免影响局域网。'
+                            : 'Tip: You can set a bandwidth limit in the Settings dialog to avoid impacting your local network performance.',
+                        style: TextStyle(
+                          color: c.textPrimary,
+                          fontSize: 12,
+                          height: 1.4,
+                        ),
                       ),
                     ),
                   ],
@@ -1368,6 +1630,91 @@ class _PairSettingsDialogState extends State<PairSettingsDialog> {
     }
   }
 
+  Future<void> _saveAsProfile() async {
+    final s = LanguageProvider.of(context);
+    final c = context.appColors;
+    final nameController = TextEditingController();
+    String? error;
+
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: Text(s.dlgSaveProfileTitle),
+          content: SizedBox(
+            width: 350,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: nameController,
+                  autofocus: true,
+                  decoration: InputDecoration(labelText: s.labelProfileName),
+                ),
+                if (error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    error!,
+                    style: TextStyle(color: c.statusRemoved, fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            OutlinedButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text(s.btnCancel),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final trimmed = nameController.text.trim();
+                if (trimmed.isEmpty) {
+                  setDialogState(() => error = s.errProfileNameEmpty);
+                  return;
+                }
+                final exists = AppConfig.allProfiles.any(
+                  (p) => p.key.toLowerCase() == trimmed.toLowerCase(),
+                );
+                if (exists) {
+                  setDialogState(() => error = s.errProfileNameExists);
+                  return;
+                }
+                Navigator.pop(dialogContext, trimmed);
+              },
+              child: Text(s.btnSave),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (name == null) return;
+
+    final parsedExcludes = _excludesController.text
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+
+    await AppConfig.saveCustomProfile(
+      SyncProfile(
+        key: name,
+        syncMode: _syncMode,
+        conflictStrategy: widget.config.conflictStrategy,
+        schedule: _schedule,
+        excludes: parsedExcludes,
+      ),
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(s.msgProfileSaved)),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.appColors;
@@ -1395,9 +1742,10 @@ class _PairSettingsDialogState extends State<PairSettingsDialog> {
                   Text(
                     s.labelSyncMode,
                     style: TextStyle(
-                        color: c.textPrimary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600),
+                      color: c.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -1439,9 +1787,10 @@ class _PairSettingsDialogState extends State<PairSettingsDialog> {
                   Text(
                     s.labelSchedule,
                     style: TextStyle(
-                        color: c.textPrimary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600),
+                      color: c.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -1500,13 +1849,17 @@ class _PairSettingsDialogState extends State<PairSettingsDialog> {
                     color: c.statusRemoved.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(
-                        color: c.statusRemoved.withValues(alpha: 0.3)),
+                      color: c.statusRemoved.withValues(alpha: 0.3),
+                    ),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.warning_amber_rounded,
-                          color: c.statusRemoved, size: 16),
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        color: c.statusRemoved,
+                        size: 16,
+                      ),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
@@ -1529,9 +1882,10 @@ class _PairSettingsDialogState extends State<PairSettingsDialog> {
               Text(
                 s.labelExcludes,
                 style: TextStyle(
-                    color: c.textPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600),
+                  color: c.textPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(height: 8),
               TextField(
@@ -1546,13 +1900,360 @@ class _PairSettingsDialogState extends State<PairSettingsDialog> {
         ),
       ),
       actions: [
+        TextButton.icon(
+          onPressed: _saveAsProfile,
+          icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+          label: Text(s.btnSaveAsProfile),
+        ),
         OutlinedButton(
           onPressed: () => Navigator.pop(context),
           child: Text(s.btnCancel),
         ),
+        ElevatedButton(onPressed: _save, child: Text(s.btnSave)),
+      ],
+    );
+  }
+}
+
+/// Dialog showing a dry-run preview of what a sync would do, without
+/// touching any file, manifest, or deletion record.
+class PreviewSyncDialog extends StatefulWidget {
+  final SyncLogic logic;
+  final String pairId;
+
+  const PreviewSyncDialog({
+    super.key,
+    required this.logic,
+    required this.pairId,
+  });
+
+  @override
+  State<PreviewSyncDialog> createState() => _PreviewSyncDialogState();
+}
+
+class _PreviewSyncDialogState extends State<PreviewSyncDialog> {
+  bool _isLoading = true;
+  bool _hasError = false;
+  List<SyncAction> _actions = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreview();
+  }
+
+  Future<void> _loadPreview() async {
+    final actions = await widget.logic.previewSync(widget.pairId);
+    if (!mounted) return;
+    setState(() {
+      _isLoading = false;
+      _hasError = actions == null;
+      _actions = actions ?? [];
+    });
+  }
+
+  String _actionLabel(SyncAction action, AppStrings s) {
+    switch (action.type) {
+      case 'copy_src_to_tgt':
+        return s.previewActionCopyToTarget;
+      case 'copy_tgt_to_src':
+        return s.previewActionCopyToSource;
+      case 'delete_tgt':
+        return s.previewActionDeleteFromTarget;
+      case 'delete_src':
+        return s.previewActionDeleteFromSource;
+      case 'create_dir_src':
+      case 'create_dir_tgt':
+        return s.previewActionCreateFolder;
+      default:
+        return action.type;
+    }
+  }
+
+  Color _actionColor(String type, AppColors c) {
+    if (type.startsWith('copy')) return c.linkAccent;
+    if (type.startsWith('delete')) return c.statusRemoved;
+    return c.statusChanged;
+  }
+
+  IconData _actionIcon(String type) {
+    if (type.startsWith('copy')) return Icons.file_copy_outlined;
+    if (type.startsWith('delete')) return Icons.delete_outline;
+    return Icons.create_new_folder_outlined;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.appColors;
+    final s = LanguageProvider.of(context);
+
+    final copyCount = _actions.where((a) => a.type.startsWith('copy')).length;
+    final deleteCount =
+        _actions.where((a) => a.type.startsWith('delete')).length;
+    final dirCount =
+        _actions.where((a) => a.type.startsWith('create_dir')).length;
+
+    Widget body;
+    if (_isLoading) {
+      body = Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: c.linkAccent),
+            const SizedBox(height: 12),
+            Text(
+              s.previewLoading,
+              style: TextStyle(color: c.textMuted, fontSize: 13),
+            ),
+          ],
+        ),
+      );
+    } else if (_hasError) {
+      body = Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.error_outline, size: 48, color: c.statusRemoved),
+            const SizedBox(height: 12),
+            Text(
+              s.previewErrorPaths,
+              style: TextStyle(color: c.textMuted, fontSize: 13),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    } else if (_actions.isEmpty) {
+      body = Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.check_circle_outline, size: 48, color: c.statusActive),
+            const SizedBox(height: 12),
+            Text(
+              s.previewNoChanges,
+              style: TextStyle(color: c.textMuted, fontSize: 13),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    } else {
+      body = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: c.linkAccent.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              s.previewSummary(copyCount, deleteCount, dirCount),
+              style: TextStyle(
+                color: c.textPrimary,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: ListView.builder(
+              itemCount: _actions.length,
+              itemBuilder: (context, index) {
+                final action = _actions[index];
+                final color = _actionColor(action.type, c);
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  color: c.bgTertiary,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(6),
+                    side: BorderSide(color: c.borderDefault),
+                  ),
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(_actionIcon(action.type), color: color, size: 20),
+                    title: Text(
+                      action.relativePath,
+                      style: TextStyle(
+                        color: c.textPrimary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      action.size > 0
+                          ? '${_actionLabel(action, s)} · ${formatFileSize(action.size)}'
+                          : _actionLabel(action, s),
+                      style: TextStyle(color: c.textMuted, fontSize: 10),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      );
+    }
+
+    return AlertDialog(
+      title: Row(
+        children: [
+          Icon(Icons.visibility_outlined, color: c.linkAccent, size: 24),
+          const SizedBox(width: 10),
+          Text(s.previewDialogTitle),
+        ],
+      ),
+      content: SizedBox(width: 520, height: 420, child: body),
+      actions: [
         ElevatedButton(
-          onPressed: _save,
-          child: Text(s.btnSave),
+          onPressed: () => Navigator.pop(context),
+          child: Text(s.btnClose),
+        ),
+      ],
+    );
+  }
+}
+
+/// Dialog to view built-in profiles and manage (delete) custom ones.
+class ProfilesDialog extends StatefulWidget {
+  const ProfilesDialog({super.key});
+
+  @override
+  State<ProfilesDialog> createState() => _ProfilesDialogState();
+}
+
+class _ProfilesDialogState extends State<ProfilesDialog> {
+  Future<void> _confirmDelete(SyncProfile profile, AppStrings s) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(s.confirmDeleteTitle),
+        content: Text(s.confirmDeleteProfileDesc),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(s.btnCancel),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: context.appColors.statusRemoved,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(s.btnDelete),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await AppConfig.deleteCustomProfile(profile.key);
+      if (mounted) setState(() {});
+    }
+  }
+
+  Widget _profileTile(SyncProfile profile, AppStrings s, AppColors c) {
+    final desc = profile.displayDescription(s);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      color: c.bgTertiary,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(6),
+        side: BorderSide(color: c.borderDefault),
+      ),
+      child: ListTile(
+        dense: true,
+        leading: Icon(
+          profile.isBuiltIn ? Icons.bookmark : Icons.bookmark_outline,
+          color: c.linkAccent,
+          size: 20,
+        ),
+        title: Text(
+          profile.displayName(s),
+          style: TextStyle(
+            color: c.textPrimary,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        subtitle: Text(
+          desc.isNotEmpty
+              ? desc
+              : '${profile.syncMode == 'one_way' ? s.optOneWay : s.optTwoWay} · ${profile.schedule}',
+          style: TextStyle(color: c.textMuted, fontSize: 11),
+        ),
+        trailing: profile.isBuiltIn
+            ? null
+            : IconButton(
+                icon: Icon(Icons.delete_outline, color: c.statusRemoved),
+                tooltip: s.btnDelete,
+                onPressed: () => _confirmDelete(profile, s),
+              ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.appColors;
+    final s = LanguageProvider.of(context);
+
+    return AlertDialog(
+      title: Row(
+        children: [
+          Icon(Icons.bookmarks_outlined, color: c.linkAccent, size: 24),
+          const SizedBox(width: 10),
+          Text(s.profilesDialogTitle),
+        ],
+      ),
+      content: SizedBox(
+        width: 480,
+        height: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                s.labelBuiltInProfiles,
+                style: TextStyle(
+                  color: c.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              for (final profile in AppConfig.builtInProfiles)
+                _profileTile(profile, s, c),
+              const SizedBox(height: 12),
+              Text(
+                s.labelCustomProfiles,
+                style: TextStyle(
+                  color: c.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (AppConfig.customProfiles.isEmpty)
+                Text(
+                  s.emptyCustomProfiles,
+                  style: TextStyle(color: c.textMuted, fontSize: 12),
+                )
+              else
+                for (final profile in AppConfig.customProfiles)
+                  _profileTile(profile, s, c),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        ElevatedButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(s.btnClose),
         ),
       ],
     );
@@ -1639,92 +2340,92 @@ class _HistoryDialogState extends State<HistoryDialog> {
         child: _isLoading
             ? Center(child: CircularProgressIndicator(color: c.linkAccent))
             : _history.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.history_toggle_off,
-                            size: 48, color: c.textMuted),
-                        const SizedBox(height: 12),
-                        Text(
-                          s.historyEmpty,
-                          style: TextStyle(color: c.textMuted, fontSize: 13),
-                        ),
-                      ],
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.history_toggle_off,
+                      size: 48,
+                      color: c.textMuted,
                     ),
-                  )
-                : ListView.builder(
-                    itemCount: _history.length,
-                    itemBuilder: (context, index) {
-                      final item = _history[index] as Map<String, dynamic>;
-                      final action = item['action'] ?? '';
-                      final isSuccess = item['status'] == 'SUCCESS';
-                      final time = item['time'] ?? '';
-                      final file = item['file'] ?? '';
-                      final details = item['details'] ?? '';
+                    const SizedBox(height: 12),
+                    Text(
+                      s.historyEmpty,
+                      style: TextStyle(color: c.textMuted, fontSize: 13),
+                    ),
+                  ],
+                ),
+              )
+            : ListView.builder(
+                itemCount: _history.length,
+                itemBuilder: (context, index) {
+                  final item = _history[index] as Map<String, dynamic>;
+                  final action = item['action'] ?? '';
+                  final isSuccess = item['status'] == 'SUCCESS';
+                  final time = item['time'] ?? '';
+                  final file = item['file'] ?? '';
+                  final details = item['details'] ?? '';
 
-                      IconData icon;
-                      Color iconColor;
-                      if (action == 'COPY') {
-                        icon = Icons.file_copy_outlined;
-                        iconColor = isSuccess ? c.linkAccent : c.statusRemoved;
-                      } else if (action == 'DELETE') {
-                        icon = Icons.delete_outline;
-                        iconColor =
-                            isSuccess ? c.targetAccent : c.statusRemoved;
-                      } else {
-                        icon = Icons.warning_amber_rounded;
-                        iconColor = c.statusRemoved;
-                      }
+                  IconData icon;
+                  Color iconColor;
+                  if (action == 'COPY') {
+                    icon = Icons.file_copy_outlined;
+                    iconColor = isSuccess ? c.linkAccent : c.statusRemoved;
+                  } else if (action == 'DELETE') {
+                    icon = Icons.delete_outline;
+                    iconColor = isSuccess ? c.targetAccent : c.statusRemoved;
+                  } else {
+                    icon = Icons.warning_amber_rounded;
+                    iconColor = c.statusRemoved;
+                  }
 
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        color: c.bgTertiary,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                          side: BorderSide(color: c.borderDefault),
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    color: c.bgTertiary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
+                      side: BorderSide(color: c.borderDefault),
+                    ),
+                    child: ListTile(
+                      leading: Icon(icon, color: iconColor, size: 20),
+                      dense: true,
+                      title: Text(
+                        file.isNotEmpty ? file : details,
+                        style: TextStyle(
+                          color: c.textPrimary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
                         ),
-                        child: ListTile(
-                          leading: Icon(icon, color: iconColor, size: 20),
-                          dense: true,
-                          title: Text(
-                            file.isNotEmpty ? file : details,
-                            style: TextStyle(
-                              color: c.textPrimary,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            file.isNotEmpty ? '$time | $details' : time,
-                            style: TextStyle(color: c.textMuted, fontSize: 10),
-                          ),
-                          trailing: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: (isSuccess
-                                      ? c.statusActive
-                                      : c.statusRemoved)
-                                  .withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              isSuccess ? 'OK' : 'ERR',
-                              style: TextStyle(
-                                color: isSuccess
-                                    ? c.statusActive
-                                    : c.statusRemoved,
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        file.isNotEmpty ? '$time | $details' : time,
+                        style: TextStyle(color: c.textMuted, fontSize: 10),
+                      ),
+                      trailing: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: (isSuccess ? c.statusActive : c.statusRemoved)
+                              .withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          isSuccess ? 'OK' : 'ERR',
+                          style: TextStyle(
+                            color: isSuccess ? c.statusActive : c.statusRemoved,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                      );
-                    },
-                  ),
+                      ),
+                    ),
+                  );
+                },
+              ),
       ),
       actions: [
         ElevatedButton(

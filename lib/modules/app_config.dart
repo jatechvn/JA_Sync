@@ -3,7 +3,10 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'package:logging/logging.dart';
 import 'package:path/path.dart' as p;
+
+final _logger = Logger('AppConfig');
 
 class SyncPairConfig {
   final String id;
@@ -41,11 +44,20 @@ class SyncPairConfig {
       };
 
   factory SyncPairConfig.fromJson(Map<String, dynamic> json) {
+    final id = json['id'];
+    final source = json['source'];
+    final target = json['target'];
+    if (id is! String || source is! String || target is! String) {
+      throw FormatException(
+        'Sync pair entry is missing required id/source/target string fields: $json',
+      );
+    }
+
     final isAuto = json['autoSync'] ?? false;
     return SyncPairConfig(
-      id: json['id'],
-      sourcePath: json['source'],
-      targetPath: json['target'],
+      id: id,
+      sourcePath: source,
+      targetPath: target,
       autoSync: isAuto,
       lastSyncTime: json['lastSync'] ?? '',
       conflictStrategy: json['conflictStrategy'] ?? 'newer_wins',
@@ -58,11 +70,109 @@ class SyncPairConfig {
   }
 }
 
+/// A reusable bundle of sync settings that can be applied when creating or
+/// editing a pair. Built-in profiles ship with a fixed [key] (translated in
+/// the UI); custom profiles are free-named by the user.
+class SyncProfile {
+  final String key;
+  final String syncMode;
+  final String conflictStrategy;
+  final String schedule;
+  final List<String> excludes;
+  final bool isBuiltIn;
+
+  const SyncProfile({
+    required this.key,
+    required this.syncMode,
+    required this.conflictStrategy,
+    required this.schedule,
+    required this.excludes,
+    this.isBuiltIn = false,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'key': key,
+        'syncMode': syncMode,
+        'conflictStrategy': conflictStrategy,
+        'schedule': schedule,
+        'excludes': excludes,
+      };
+
+  factory SyncProfile.fromJson(Map<String, dynamic> json) {
+    final key = json['key'];
+    if (key is! String || key.trim().isEmpty) {
+      throw FormatException('Profile entry is missing a valid key: $json');
+    }
+    return SyncProfile(
+      key: key,
+      syncMode: json['syncMode'] ?? 'two_way',
+      conflictStrategy: json['conflictStrategy'] ?? 'newer_wins',
+      schedule: json['schedule'] ?? 'manual',
+      excludes: json['excludes'] != null
+          ? List<String>.from(json['excludes'])
+          : const [],
+      isBuiltIn: false,
+    );
+  }
+}
+
 class AppConfig {
   static String? customConfigPath;
   static String? _configPath;
   static Map<String, dynamic> _values = {};
   static List<SyncPairConfig> _pairs = [];
+  static List<SyncProfile> _customProfiles = [];
+
+  /// Fixed built-in profiles; their key is used to look up translated
+  /// name/description strings in the UI (see AppStrings.profileName/Desc).
+  static const List<SyncProfile> builtInProfiles = [
+    SyncProfile(
+      key: 'backup_mirror',
+      syncMode: 'one_way',
+      conflictStrategy: 'source_wins',
+      schedule: 'manual',
+      excludes: [],
+      isBuiltIn: true,
+    ),
+    SyncProfile(
+      key: 'bi_directional',
+      syncMode: 'two_way',
+      conflictStrategy: 'newer_wins',
+      schedule: 'realtime',
+      excludes: [],
+      isBuiltIn: true,
+    ),
+    SyncProfile(
+      key: 'archive',
+      syncMode: 'one_way',
+      conflictStrategy: 'target_wins',
+      schedule: '24h',
+      excludes: [],
+      isBuiltIn: true,
+    ),
+  ];
+
+  /// User-created profiles saved from a pair's current settings.
+  static List<SyncProfile> get customProfiles => _customProfiles;
+
+  /// Built-in profiles followed by custom profiles.
+  static List<SyncProfile> get allProfiles => [
+        ...builtInProfiles,
+        ..._customProfiles,
+      ];
+
+  /// Save (or overwrite by key) a custom profile.
+  static Future<void> saveCustomProfile(SyncProfile profile) async {
+    _customProfiles.removeWhere((p) => p.key == profile.key);
+    _customProfiles.add(profile);
+    await save();
+  }
+
+  /// Delete a custom profile by key. No-op for built-in profile keys.
+  static Future<void> deleteCustomProfile(String key) async {
+    _customProfiles.removeWhere((p) => p.key == key && !p.isBuiltIn);
+    await save();
+  }
 
   /// Initialize and load configs from config.json next to the executable
   static Future<void> initialize() async {
@@ -91,9 +201,29 @@ class AppConfig {
       final content = file.readAsStringSync();
       _values = jsonDecode(content) as Map<String, dynamic>;
       final list = _values['pairs'] as List? ?? [];
-      _pairs = list
-          .map((item) => SyncPairConfig.fromJson(item as Map<String, dynamic>))
-          .toList();
+
+      // Parse each pair independently so one malformed/hand-edited entry
+      // doesn't wipe out every other configured sync pair.
+      final loadedPairs = <SyncPairConfig>[];
+      for (final item in list) {
+        try {
+          loadedPairs.add(SyncPairConfig.fromJson(item as Map<String, dynamic>));
+        } catch (e) {
+          _logger.warning('Skipping invalid sync pair entry in config: $e');
+        }
+      }
+      _pairs = loadedPairs;
+
+      final profilesList = _values['profiles'] as List? ?? [];
+      final loadedProfiles = <SyncProfile>[];
+      for (final item in profilesList) {
+        try {
+          loadedProfiles.add(SyncProfile.fromJson(item as Map<String, dynamic>));
+        } catch (e) {
+          _logger.warning('Skipping invalid sync profile entry in config: $e');
+        }
+      }
+      _customProfiles = loadedProfiles;
     } catch (_) {
       // Fallback to defaults on corrupt config
       _values = {
@@ -101,6 +231,7 @@ class AppConfig {
         'theme': 'dark',
       };
       _pairs = [];
+      _customProfiles = [];
     }
   }
 
@@ -114,6 +245,7 @@ class AppConfig {
       } catch (_) {}
     }
     _values['pairs'] = _pairs.map((p) => p.toJson()).toList();
+    _values['profiles'] = _customProfiles.map((p) => p.toJson()).toList();
     final encoder = const JsonEncoder.withIndent('  ');
     file.writeAsStringSync(encoder.convert(_values));
   }
@@ -122,6 +254,7 @@ class AppConfig {
   static Future<void> exportConfig(String destPath) async {
     if (_configPath == null) return;
     _values['pairs'] = _pairs.map((p) => p.toJson()).toList();
+    _values['profiles'] = _customProfiles.map((p) => p.toJson()).toList();
     final encoder = const JsonEncoder.withIndent('  ');
     final content = encoder.convert(_values);
     File(destPath).writeAsStringSync(content);
@@ -163,6 +296,17 @@ class AppConfig {
       _pairs = list
           .map((item) => SyncPairConfig.fromJson(item as Map<String, dynamic>))
           .toList();
+
+      final profilesList = _values['profiles'] as List? ?? [];
+      final loadedProfiles = <SyncProfile>[];
+      for (final item in profilesList) {
+        try {
+          loadedProfiles.add(SyncProfile.fromJson(item as Map<String, dynamic>));
+        } catch (e) {
+          _logger.warning('Skipping invalid sync profile entry on import: $e');
+        }
+      }
+      _customProfiles = loadedProfiles;
 
       await save();
       return true;

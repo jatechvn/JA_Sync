@@ -48,7 +48,7 @@ class BuildInfo {
   static String get modeName => isDebug ? 'DEBUG' : 'RELEASE';
 
   /// Version number
-  static const String version = '1.1.0';
+  static const String version = '1.2.0';
 
   /// Badge text for UI header
   static String get badgeLabel {

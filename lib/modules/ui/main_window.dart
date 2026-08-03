@@ -93,6 +93,21 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
         result['target'],
         result['strategy'],
       );
+
+      // Apply the rest of a chosen profile (sync mode, schedule, excludes)
+      // to the pair that was just created.
+      final syncMode = result['syncMode'] as String? ?? 'two_way';
+      final schedule = result['schedule'] as String? ?? 'manual';
+      final excludes = List<String>.from(result['excludes'] as List? ?? []);
+      if (syncMode != 'two_way' || schedule != 'manual' || excludes.isNotEmpty) {
+        final newState = widget.logic.states.last;
+        await widget.logic.updatePairSettings(
+          newState.config.id,
+          syncMode,
+          schedule,
+          excludes,
+        );
+      }
     }
   }
 
@@ -184,10 +199,10 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: Colors.amber.withOpacity(0.2),
+                color: Colors.amber.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: Colors.amber.withOpacity(0.6),
+                  color: Colors.amber.withValues(alpha: 0.6),
                   width: 1,
                 ),
               ),
@@ -216,8 +231,11 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
 
           // Sync All Button
           ElevatedButton.icon(
-            onPressed: (widget.logic.states.isEmpty ||
-                    widget.logic.states.any((state) => state.config.schedule != 'manual'))
+            onPressed:
+                (widget.logic.states.isEmpty ||
+                    widget.logic.states.any(
+                      (state) => state.config.schedule != 'manual',
+                    ))
                 ? null
                 : () => widget.logic.syncAll(),
             icon: const Icon(Icons.sync_outlined, size: 16),
@@ -252,7 +270,9 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                 Text(
                   widget.languageNotifier.current.shortLabel,
                   style: const TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.bold),
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ],
             ),
@@ -272,6 +292,22 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
             },
             icon: Icon(Icons.history, color: c.textPrimary),
             tooltip: s.historyTitle,
+          ),
+          const SizedBox(width: 4),
+
+          // Manage Profiles button
+          IconButton(
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (_) => BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 5.0, sigmaY: 5.0),
+                  child: const ProfilesDialog(),
+                ),
+              );
+            },
+            icon: Icon(Icons.bookmarks_outlined, color: c.textPrimary),
+            tooltip: s.btnManageProfiles,
           ),
           const SizedBox(width: 4),
 
@@ -330,10 +366,7 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
           const SizedBox(height: 6),
           Text(
             s.emptySubtitle,
-            style: TextStyle(
-              fontSize: 13,
-              color: c.textMuted,
-            ),
+            style: TextStyle(fontSize: 13, color: c.textMuted),
           ),
         ],
       ),
@@ -350,10 +383,20 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
     } catch (_) {}
   }
 
-  Widget _buildDashboardAndSearchBar(BuildContext context, AppColors c, AppStrings s) {
+  Widget _buildDashboardAndSearchBar(
+    BuildContext context,
+    AppColors c,
+    AppStrings s,
+  ) {
     final totalPairs = widget.logic.states.length;
-    final activeWatchers = widget.logic.states.where((st) => st.config.schedule == 'realtime').length;
-    final syncingPairs = widget.logic.states.where((st) => st.status == statusSyncing || st.status == statusScanning).length;
+    final activeWatchers = widget.logic.states
+        .where((st) => st.config.schedule == 'realtime')
+        .length;
+    final syncingPairs = widget.logic.states
+        .where(
+          (st) => st.status == statusSyncing || st.status == statusScanning,
+        )
+        .length;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -367,8 +410,8 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                 s.lang == AppLanguage.vi
                     ? 'Tổng cặp đồng bộ'
                     : s.lang == AppLanguage.zh
-                        ? '总同步配对'
-                        : 'Total Pairs',
+                    ? '总同步配对'
+                    : 'Total Pairs',
                 '$totalPairs',
                 Icons.folder_copy_outlined,
                 c,
@@ -377,8 +420,8 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                 s.lang == AppLanguage.vi
                     ? 'Bộ theo dõi (Realtime)'
                     : s.lang == AppLanguage.zh
-                        ? '实时监控器'
-                        : 'Active Watchers',
+                    ? '实时监控器'
+                    : 'Active Watchers',
                 '$activeWatchers',
                 Icons.visibility_outlined,
                 c,
@@ -387,8 +430,8 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                 s.lang == AppLanguage.vi
                     ? 'Đang đồng bộ'
                     : s.lang == AppLanguage.zh
-                        ? '正在同步'
-                        : 'Syncing Now',
+                    ? '正在同步'
+                    : 'Syncing Now',
                 '$syncingPairs',
                 Icons.sync_rounded,
                 c,
@@ -408,9 +451,13 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                       hintText: s.lang == AppLanguage.vi
                           ? 'Tìm kiếm theo tên thư mục hoặc đường dẫn...'
                           : s.lang == AppLanguage.zh
-                              ? '根据文件夹名称或路径搜索...'
-                              : 'Search by folder name or path...',
-                      prefixIcon: Icon(Icons.search_rounded, color: c.textMuted, size: 18),
+                          ? '根据文件夹名称或路径搜索...'
+                          : 'Search by folder name or path...',
+                      prefixIcon: Icon(
+                        Icons.search_rounded,
+                        color: c.textMuted,
+                        size: 18,
+                      ),
                       contentPadding: const EdgeInsets.symmetric(vertical: 8),
                     ),
                     onChanged: (val) {
@@ -434,7 +481,11 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                   child: DropdownButton<String>(
                     hint: Row(
                       children: [
-                        Icon(Icons.date_range_rounded, color: c.linkAccent, size: 16),
+                        Icon(
+                          Icons.date_range_rounded,
+                          color: c.linkAccent,
+                          size: 16,
+                        ),
                         const SizedBox(width: 8),
                         Text(
                           s.labelApplyScheduleAll,
@@ -446,12 +497,27 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                     style: TextStyle(color: c.textPrimary, fontSize: 13),
                     icon: Icon(Icons.arrow_drop_down, color: c.textMuted),
                     items: [
-                      DropdownMenuItem(value: 'manual', child: Text(s.optSchedManual)),
-                      DropdownMenuItem(value: 'realtime', child: Text(s.optSchedRealtime)),
-                      DropdownMenuItem(value: '15m', child: Text(s.optSched15m)),
+                      DropdownMenuItem(
+                        value: 'manual',
+                        child: Text(s.optSchedManual),
+                      ),
+                      DropdownMenuItem(
+                        value: 'realtime',
+                        child: Text(s.optSchedRealtime),
+                      ),
+                      DropdownMenuItem(
+                        value: '15m',
+                        child: Text(s.optSched15m),
+                      ),
                       DropdownMenuItem(value: '1h', child: Text(s.optSched1h)),
-                      DropdownMenuItem(value: '12h', child: Text(s.optSched12h)),
-                      DropdownMenuItem(value: '24h', child: Text(s.optSched24h)),
+                      DropdownMenuItem(
+                        value: '12h',
+                        child: Text(s.optSched12h),
+                      ),
+                      DropdownMenuItem(
+                        value: '24h',
+                        child: Text(s.optSched24h),
+                      ),
                     ],
                     onChanged: (val) async {
                       if (val != null) {
@@ -462,20 +528,27 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                             child: AlertDialog(
                               title: Row(
                                 children: [
-                                  Icon(Icons.warning_amber_rounded, color: c.linkAccent),
+                                  Icon(
+                                    Icons.warning_amber_rounded,
+                                    color: c.linkAccent,
+                                  ),
                                   const SizedBox(width: 8),
-                                  Text(s.lang == AppLanguage.vi
-                                      ? 'Áp dụng cho tất cả'
-                                      : s.lang == AppLanguage.zh
-                                          ? '应用到所有'
-                                          : 'Apply to All'),
+                                  Text(
+                                    s.lang == AppLanguage.vi
+                                        ? 'Áp dụng cho tất cả'
+                                        : s.lang == AppLanguage.zh
+                                        ? '应用到所有'
+                                        : 'Apply to All',
+                                  ),
                                 ],
                               ),
-                              content: Text(s.lang == AppLanguage.vi
-                                  ? 'Bạn có chắc chắn muốn thay đổi lịch trình đồng bộ của tất cả các cặp thành chế độ đã chọn?'
-                                  : s.lang == AppLanguage.zh
-                                      ? '您确定要将所有配对的同步计划更改为所选模式吗？'
-                                      : 'Are you sure you want to change the sync schedule of all pairs to the selected mode?'),
+                              content: Text(
+                                s.lang == AppLanguage.vi
+                                    ? 'Bạn có chắc chắn muốn thay đổi lịch trình đồng bộ của tất cả các cặp thành chế độ đã chọn?'
+                                    : s.lang == AppLanguage.zh
+                                    ? '您确定要将所有配对的同步计划更改为所选模式吗？'
+                                    : 'Are you sure you want to change the sync schedule of all pairs to the selected mode?',
+                              ),
                               actions: [
                                 TextButton(
                                   onPressed: () => Navigator.pop(ctx, false),
@@ -491,14 +564,16 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                         );
                         if (confirm == true) {
                           await widget.logic.updateAllSchedules(val);
-                          if (mounted) {
+                          if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text(s.lang == AppLanguage.vi
-                                    ? 'Đã áp dụng lịch trình đồng bộ cho tất cả các mục!'
-                                    : s.lang == AppLanguage.zh
-                                        ? '已应用同步计划到所有项！'
-                                        : 'Applied sync schedule to all items!'),
+                                content: Text(
+                                  s.lang == AppLanguage.vi
+                                      ? 'Đã áp dụng lịch trình đồng bộ cho tất cả các mục!'
+                                      : s.lang == AppLanguage.zh
+                                      ? '已应用同步计划到所有项！'
+                                      : 'Applied sync schedule to all items!',
+                                ),
                                 backgroundColor: c.statusActive,
                               ),
                             );
@@ -516,7 +591,12 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
     );
   }
 
-  Widget _buildStatCard(String label, String value, IconData icon, AppColors c) {
+  Widget _buildStatCard(
+    String label,
+    String value,
+    IconData icon,
+    AppColors c,
+  ) {
     return Expanded(
       child: Card(
         margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -572,8 +652,8 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
               s.lang == AppLanguage.vi
                   ? 'Không tìm thấy kết quả nào khớp!'
                   : s.lang == AppLanguage.zh
-                      ? '没有找到匹配的结果！'
-                      : 'No matching results found!',
+                  ? '没有找到匹配的结果！'
+                  : 'No matching results found!',
               style: TextStyle(color: c.textMuted, fontSize: 13),
             ),
           ],
@@ -586,8 +666,8 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
       itemCount: filtered.length,
       itemBuilder: (context, index) {
         final state = filtered[index];
-        final isBusy = state.status == statusSyncing ||
-            state.status == statusScanning;
+        final isBusy =
+            state.status == statusSyncing || state.status == statusScanning;
 
         return Card(
           margin: const EdgeInsets.only(bottom: 16),
@@ -616,7 +696,9 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                               Container(
                                 width: 75,
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 3),
+                                  horizontal: 6,
+                                  vertical: 3,
+                                ),
                                 decoration: BoxDecoration(
                                   color: c.linkAccent.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(4),
@@ -635,19 +717,27 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: StyledWidgets.pathDisplay(
-                                    state.config.sourcePath,
-                                    c: c),
+                                  state.config.sourcePath,
+                                  c: c,
+                                ),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.folder_open_outlined, size: 16),
+                                icon: const Icon(
+                                  Icons.folder_open_outlined,
+                                  size: 16,
+                                ),
                                 constraints: const BoxConstraints(),
-                                padding: const EdgeInsets.symmetric(horizontal: 4),
-                                onPressed: () => _openFolderInExplorer(state.config.sourcePath),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                                onPressed: () => _openFolderInExplorer(
+                                  state.config.sourcePath,
+                                ),
                                 tooltip: s.lang == AppLanguage.vi
                                     ? 'Mở thư mục nguồn'
                                     : s.lang == AppLanguage.zh
-                                        ? '打开源文件夹'
-                                        : 'Open source folder',
+                                    ? '打开源文件夹'
+                                    : 'Open source folder',
                               ),
                             ],
                           ),
@@ -657,7 +747,9 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                               Container(
                                 width: 75,
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 3),
+                                  horizontal: 6,
+                                  vertical: 3,
+                                ),
                                 decoration: BoxDecoration(
                                   color: c.targetAccent.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(4),
@@ -676,19 +768,27 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: StyledWidgets.pathDisplay(
-                                    state.config.targetPath,
-                                    c: c),
+                                  state.config.targetPath,
+                                  c: c,
+                                ),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.folder_open_outlined, size: 16),
+                                icon: const Icon(
+                                  Icons.folder_open_outlined,
+                                  size: 16,
+                                ),
                                 constraints: const BoxConstraints(),
-                                padding: const EdgeInsets.symmetric(horizontal: 4),
-                                onPressed: () => _openFolderInExplorer(state.config.targetPath),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                                onPressed: () => _openFolderInExplorer(
+                                  state.config.targetPath,
+                                ),
                                 tooltip: s.lang == AppLanguage.vi
                                     ? 'Mở thư mục đích'
                                     : s.lang == AppLanguage.zh
-                                        ? '打开目标文件夹'
-                                        : 'Open target folder',
+                                    ? '打开目标文件夹'
+                                    : 'Open target folder',
                               ),
                             ],
                           ),
@@ -700,6 +800,29 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                     // Status Badge
                     StyledWidgets.statusBadge(state.status, c),
                     const SizedBox(width: 16),
+
+                    // Preview (Dry-Run) Button
+                    IconButton(
+                      onPressed: isBusy
+                          ? null
+                          : () {
+                              showDialog(
+                                context: context,
+                                builder: (_) => BackdropFilter(
+                                  filter: ImageFilter.blur(
+                                    sigmaX: 5.0,
+                                    sigmaY: 5.0,
+                                  ),
+                                  child: PreviewSyncDialog(
+                                    logic: widget.logic,
+                                    pairId: state.config.id,
+                                  ),
+                                ),
+                              );
+                            },
+                      icon: Icon(Icons.visibility_outlined, color: c.textMuted),
+                      tooltip: s.btnPreviewSync,
+                    ),
 
                     // Manual Sync Now Button
                     IconButton.filledTonal(
@@ -722,7 +845,10 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                               showDialog(
                                 context: context,
                                 builder: (_) => BackdropFilter(
-                                  filter: ImageFilter.blur(sigmaX: 5.0, sigmaY: 5.0),
+                                  filter: ImageFilter.blur(
+                                    sigmaX: 5.0,
+                                    sigmaY: 5.0,
+                                  ),
                                   child: PairSettingsDialog(
                                     config: state.config,
                                     logic: widget.logic,
@@ -755,22 +881,34 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                   children: [
                     // Mode display
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: c.bgTertiary,
                         borderRadius: BorderRadius.circular(4),
                         border: Border.all(color: c.borderDefault),
                       ),
                       child: Text(
-                        state.config.syncMode == 'one_way' ? s.optOneWay : s.optTwoWay,
-                        style: TextStyle(color: c.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
+                        state.config.syncMode == 'one_way'
+                            ? s.optOneWay
+                            : s.optTwoWay,
+                        style: TextStyle(
+                          color: c.textSecondary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 8),
 
                     // Schedule display
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: c.bgTertiary,
                         borderRadius: BorderRadius.circular(4),
@@ -783,8 +921,8 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                             state.config.schedule == 'realtime'
                                 ? Icons.sync_disabled
                                 : state.config.schedule == 'manual'
-                                    ? Icons.touch_app_outlined
-                                    : Icons.timer_outlined,
+                                ? Icons.touch_app_outlined
+                                : Icons.timer_outlined,
                             size: 12,
                             color: c.textMuted,
                           ),
@@ -793,15 +931,19 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                             state.config.schedule == 'realtime'
                                 ? s.optSchedRealtime
                                 : state.config.schedule == 'manual'
-                                    ? s.optSchedManual
-                                    : state.config.schedule == '15m'
-                                        ? s.optSched15m
-                                        : state.config.schedule == '1h'
-                                            ? s.optSched1h
-                                            : state.config.schedule == '12h'
-                                                ? s.optSched12h
-                                                : s.optSched24h,
-                            style: TextStyle(color: c.textSecondary, fontSize: 11, fontWeight: FontWeight.w600),
+                                ? s.optSchedManual
+                                : state.config.schedule == '15m'
+                                ? s.optSched15m
+                                : state.config.schedule == '1h'
+                                ? s.optSched1h
+                                : state.config.schedule == '12h'
+                                ? s.optSched12h
+                                : s.optSched24h,
+                            style: TextStyle(
+                              color: c.textSecondary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ],
                       ),
@@ -814,9 +956,10 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                         Text(
                           '${s.labelConflictStrategy}:',
                           style: TextStyle(
-                              color: c.textSecondary,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600),
+                            color: c.textSecondary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         const SizedBox(width: 8),
                         Container(
@@ -831,9 +974,10 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                               value: state.config.conflictStrategy,
                               dropdownColor: c.bgSecondary,
                               style: TextStyle(
-                                  color: c.textPrimary,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500),
+                                color: c.textPrimary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
                               isDense: true,
                               items: [
                                 DropdownMenuItem(
@@ -854,7 +998,9 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                                   : (val) {
                                       if (val != null) {
                                         widget.logic.updateConflictStrategy(
-                                            state.config.id, val);
+                                          state.config.id,
+                                          val,
+                                        );
                                       }
                                     },
                             ),
@@ -885,18 +1031,20 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                         child: Text(
                           state.statusMessage,
                           style: TextStyle(
-                              color: c.textSecondary,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500),
+                            color: c.textSecondary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       Text(
                         '${(state.progress * 100).toStringAsFixed(0)}%',
                         style: TextStyle(
-                            color: c.linkAccent,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold),
+                          color: c.linkAccent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ],
                   ),
@@ -918,10 +1066,11 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
                             ? state.statusMessage
                             : '',
                         style: TextStyle(
-                            color: state.status == statusError
-                                ? c.statusRemoved
-                                : c.textSecondary,
-                            fontSize: 12),
+                          color: state.status == statusError
+                              ? c.statusRemoved
+                              : c.textSecondary,
+                          fontSize: 12,
+                        ),
                       ),
                       Text(
                         state.config.lastSyncTime.isNotEmpty

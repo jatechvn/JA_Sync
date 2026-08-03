@@ -3,19 +3,22 @@ import 'dart:io';
 void main(List<String> args) {
   if (args.isEmpty) return;
   final rootPath = args[0];
-  print("Testing scan on: $rootPath");
-  
+  stdout.writeln('Testing scan on: $rootPath');
+
   final root = Directory(rootPath);
   if (!root.existsSync()) return;
 
   int count = 0;
-  List<Directory> dirsToScan = [root];
-  
+  final dirsToScan = <Directory>[root];
+
   try {
     while (dirsToScan.isNotEmpty) {
       final currentDir = dirsToScan.removeLast();
       try {
-        final entities = currentDir.listSync(recursive: false, followLinks: false);
+        final entities = currentDir.listSync(
+          recursive: false,
+          followLinks: false,
+        );
         for (final entity in entities) {
           count++;
           entity.statSync();
@@ -24,11 +27,11 @@ void main(List<String> args) {
           }
         }
       } catch (e) {
-        print("Error at ${currentDir.path}: $e");
+        stderr.writeln('Error at ${currentDir.path}: $e');
       }
     }
-    print("Scanned $count items with listSync.");
+    stdout.writeln('Scanned $count items with listSync.');
   } catch (e) {
-    print("Fatal error: $e");
+    stderr.writeln('Fatal error: $e');
   }
 }
